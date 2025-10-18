@@ -4,18 +4,20 @@ import csv
 import os
 from datetime import datetime
 from bleak import BleakClient, BleakScanner
+from typing import Optional, List
 
 # UUID del servicio y característica
 SERVICE_UUID = "19B10000-E8F2-537E-4F6C-D104768A1214"
 BUFFER_CHAR_UUID = "19B10001-E8F2-537E-4F6C-D104768A1214"
+TARGET_NAME = "ArduinoEsclavo"
 
 # Ruta al archivo CSV (relativa al directorio del proyecto)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.join(SCRIPT_DIR, '..', '..')
 CSV_FILENAME = os.path.join(PROJECT_DIR, 'data', 'sensor_data.csv')
 
-# Variable para almacenar el cliente
-client = None
+# Estado de la dirección/MAC conocida (puede cambiar en BLE)
+known_address: Optional[str] = None
 
 def process_buffer_data(buffer_data):
     """
@@ -99,51 +101,106 @@ def notification_handler(sender, data):
     save_to_csv(records)
     print()
 
-async def find_arduino():
+async def find_arduino(timeout: float = 8.0):
     """
-    Busca el dispositivo ArduinoEsclavo
+    Busca el dispositivo por nombre y (si es posible) por UUID de servicio.
+    Devuelve el objeto BLEDevice si lo encuentra, de lo contrario None.
     """
-    print("Buscando ArduinoEsclavo...")
-    devices = await BleakScanner.discover()
-    
-    for device in devices:
-        if device.name == "ArduinoEsclavo":
-            print(f"✓ ArduinoEsclavo encontrado: {device.address}")
-            return device.address
-    
-    print("✗ ArduinoEsclavo no encontrado")
-    return None
+    print(f"🔎 Buscando {TARGET_NAME}...")
+    candidates = await BleakScanner.discover(timeout=timeout)
+
+    # Filtrar por nombre (algunos dispositivos pueden publicar None como nombre)
+    named: List = [d for d in candidates if (d.name or '').strip() == TARGET_NAME]
+
+    if not named:
+        print("✗ Dispositivo no encontrado en este escaneo")
+        return None
+
+    # Priorizar los que anuncian el servicio esperado si está disponible en metadata
+    def has_service(d) -> int:
+        try:
+            uuids = (d.metadata or {}).get('uuids') or []
+            return 1 if SERVICE_UUID.lower() in [u.lower() for u in uuids] else 0
+        except Exception:
+            return 0
+
+    # Orden: primero con servicio, luego por RSSI más fuerte
+    named.sort(key=lambda d: (has_service(d), getattr(d, 'rssi', -9999)), reverse=True)
+    device = named[0]
+
+    print(f"✓ {TARGET_NAME} candidato: {device.address} (RSSI {getattr(device, 'rssi', 'NA')})")
+    return device
 
 async def connect_and_receive():
     """
-    Conecta al Arduino y recibe datos
+    Conecta al Arduino y recibe datos, verificando cambios de MAC y reconectando automáticamente.
     """
-    global client
-    
-    # Buscar dispositivo
-    address = await find_arduino()
-    if not address:
-        return
-    
-    # Conectar
-    try:
-        async with BleakClient(address) as client:
-            print(f"✓ Conectado a ArduinoEsclavo")
-            
-            # Suscribirse a notificaciones
-            await client.start_notify(BUFFER_CHAR_UUID, notification_handler)
-            print(f"✓ Suscrito a notificaciones del buffer")
-            print(f"Esperando datos...\n")
-            
-            # Mantener conexión abierta
-            while True:
+    global known_address
+
+    backoff = 2  # segundos, con tope
+    max_backoff = 30
+
+    while True:
+        try:
+            device = await find_arduino(timeout=8)
+            if not device:
+                # Incrementar backoff cuando no se encuentra
+                print(f"⏳ Reintentando escaneo en {backoff}s...")
+                await asyncio.sleep(backoff)
+                backoff = min(max_backoff, backoff * 2)
+                continue
+
+            # Verificar cambio de MAC/dirección
+            if known_address and device.address != known_address:
+                print(f"⚠ Dirección/MAC cambió: {known_address} → {device.address}")
+            elif not known_address:
+                print(f"✓ Dirección/MAC inicial: {device.address}")
+            else:
+                print(f"✓ Dirección/MAC coincide: {device.address}")
+
+            known_address = device.address
+
+            disconnected_event = asyncio.Event()
+
+            def _on_disconnect(_client):
+                print("✗ Desconectado del dispositivo (evento)")
+                try:
+                    disconnected_event.set()
+                except Exception:
+                    pass
+
+            print("🔗 Intentando conectar...")
+            async with BleakClient(known_address, disconnected_callback=_on_disconnect) as client:
+                # Confirmación de conexión
                 if not client.is_connected:
-                    print("✗ Desconectado")
-                    break
-                await asyncio.sleep(1)
-                
-    except Exception as e:
-        print(f"✗ Error: {e}")
+                    raise RuntimeError("No se pudo establecer la conexión")
+
+                print(f"✓ Conectado a {TARGET_NAME} @ {client.address}")
+
+                # Suscribirse a notificaciones del buffer
+                await client.start_notify(BUFFER_CHAR_UUID, notification_handler)
+                print("✓ Suscrito a notificaciones del buffer. Esperando datos...\n")
+
+                # Resetear backoff tras conexión exitosa
+                backoff = 2
+
+                # Esperar hasta que se dispare el evento de desconexión
+                await disconnected_event.wait()
+
+            # Al salir del contexto, el cliente ya está cerrado. Volver a intentar.
+            print("↻ Intentando reconectar...")
+            await asyncio.sleep(1)
+
+        except asyncio.CancelledError:
+            raise
+        except KeyboardInterrupt:
+            print("\n✓ Programa terminado por el usuario")
+            return
+        except Exception as e:
+            print(f"✗ Error de conexión/recepción: {e}")
+            print(f"⏳ Reintentando en {backoff}s...")
+            await asyncio.sleep(backoff)
+            backoff = min(max_backoff, max(2, backoff * 2))
 
 async def main():
     """
