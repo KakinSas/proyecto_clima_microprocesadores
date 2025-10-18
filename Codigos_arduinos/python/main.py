@@ -4,6 +4,7 @@ import sys
 import os
 import time
 import importlib.util
+import signal
 
 def import_module_from_path(module_name, file_path):
     """
@@ -103,11 +104,48 @@ async def main():
         wired_running = False
         wireless_running = False
 
-if __name__ == "__main__":
+def _ignore_sighup_if_possible():
+    """Ignora SIGHUP para que el proceso continúe si se cierra la terminal (Linux/Raspberry Pi)."""
     try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n✓ Programa terminado por el usuario")
-        wired_running = False
-        wireless_running = False
+        if hasattr(signal, "SIGHUP"):
+            signal.signal(signal.SIGHUP, signal.SIG_IGN)
+            print("↪ Ignorando SIGHUP: el proceso continuará si se cierra la terminal.")
+    except Exception:
+        # En algunos entornos puede no ser aplicable; continuar sin fallar
+        pass
+
+
+def run_supervisado():
+    """Ejecuta main() en bucle con auto-reinicio ante fallos inesperados.
+
+    - Ctrl+C (KeyboardInterrupt) detiene definitivamente.
+    - Si la terminal se cierra, se ignora SIGHUP (en Linux) y el proceso sigue.
+    - Ante cualquier otra excepción, se reinicia con backoff.
+    """
+    _ignore_sighup_if_possible()
+    reintentos = 0
+    backoff_max = 30
+    while True:
+        try:
+            asyncio.run(main())
+            # Si main() retornó normalmente, reiniciar tras breve pausa
+            print("ℹ main() finalizó; reiniciando en 5s...")
+            reintentos = 0
+            time.sleep(5)
+        except KeyboardInterrupt:
+            print("\n✓ Programa terminado por el usuario")
+            global wired_running, wireless_running
+            wired_running = False
+            wireless_running = False
+            break
+        except Exception as e:
+            reintentos = min(reintentos + 1, 6)
+            espera = min(5 * reintentos, backoff_max)
+            print(f"✗ Error toplevel: {e}")
+            print(f"⏳ Reiniciando en {espera}s...")
+            time.sleep(espera)
+
+
+if __name__ == "__main__":
+    run_supervisado()
 
