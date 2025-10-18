@@ -39,3 +39,7 @@ desktop.ini
 # Archivos temporales
 *.tmp
 *.temp
+
+# data
+Codigos_arduinos/data/sensor_data.csv
+

@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 
 # Configuración del puerto serial
-SERIAL_PORT = "COM5"
+SERIAL_PORT = "/dev/ttyACM0"
 BAUD_RATE = 9600
 
 # Ruta al archivo CSV (relativa al directorio del proyecto)
@@ -108,9 +108,9 @@ def main():
                             record = parse_registro(line)
                             if record:
                                 registro_count += 1
-                                # Mostrar en consola
-                                print(f"Registro {registro_count} - Temp: {record['temperatura']} °C, "
-                                      f"Hum: {record['humedad']} %, Pres: {record['presion']} kPa")
+                                # Mostrar en consola (innecesario)
+                                #print(f"Registro {registro_count} - Temp: {record['temperatura']} °C, "
+                                #      f"Hum: {record['humedad']} %, Pres: {record['presion']} kPa")
                                 
                                 # Guardar en CSV
                                 save_to_csv(record)
