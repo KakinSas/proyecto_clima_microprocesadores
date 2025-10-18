@@ -29,25 +29,32 @@ BLEService bufferService("19B10000-E8F2-537E-4F6C-D104768A1214");
 // Característica del buffer (UUID personalizado)
 BLECharacteristic bufferChar("19B10001-E8F2-537E-4F6C-D104768A1214", BLERead | BLENotify, BUFFER_SIZE);
 
+// ---- Depuración no bloqueante (opcional) ----
+// Cambia DEBUG a 0 para desactivar prints en producción
+#define DEBUG 1
+#define DBG_BEGIN(baud)            do { if (DEBUG) { Serial.begin(baud); delay(100); } } while (0)
+#define DBG_PRINT(x)               do { if (DEBUG && Serial) { Serial.print(x); } } while (0)
+#define DBG_PRINTLN(x)             do { if (DEBUG && Serial) { Serial.println(x); } } while (0)
+
 void setup() {
-  Serial.begin(9600);
-  while (!Serial);
+  // Iniciar Serial solo para depuración, sin bloquear si no hay USB
+  DBG_BEGIN(9600);
 
   pinMode(LED_BUILTIN, OUTPUT);
 
   // Inicialización de sensores
   if (!HTS.begin()) {
-    Serial.println("Fallo HTS221");
+    DBG_PRINTLN("Fallo HTS221");
     while (1);
   }
   if (!BARO.begin()) {
-    Serial.println("Fallo LPS22HB");
+    DBG_PRINTLN("Fallo LPS22HB");
     while (1);
   }
 
   // Inicialización BLE
   if (!BLE.begin()) {
-    Serial.println("Fallo BLE init");
+    DBG_PRINTLN("Fallo BLE init");
     while (1);
   }
 
@@ -64,7 +71,7 @@ void setup() {
   bufferChar.writeValue(dataBuffer, BUFFER_SIZE);
 
   BLE.advertise();
-  Serial.println("Esclavo listo y anunciando...");
+  DBG_PRINTLN("Esclavo listo y anunciando...");
 
   lastActivity = millis();
 }
@@ -88,7 +95,7 @@ void loop() {
 
     // Verificar inactividad
     if (millis() - lastActivity > centralTimeout) {
-      Serial.println("Central inactivo, reiniciando...");
+      DBG_PRINTLN("Central inactivo, reiniciando...");
       restartBLE();
     }
 
@@ -128,13 +135,13 @@ void addSensorDataToBuffer() {
 
 void sendBuffer() {
   // Enviar buffer completo
-  Serial.println("Buffer lleno, subiendo informacion a BLE");
+  DBG_PRINTLN("Buffer lleno, subiendo informacion a BLE");
   bufferChar.writeValue(dataBuffer, bufferIndex);
 }
 
 // Reinicio controlado del stack BLE
 void restartBLE() {
-  Serial.println("Reiniciando Esclavo...");
+  DBG_PRINTLN("Reiniciando Esclavo...");
   BLE.end();              // detener BLE
   delay(1000);
   McuArmTools_SoftwareReset();     // reinicio completo del microcontrolador (ARM Cortex-M)
