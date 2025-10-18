@@ -19,6 +19,41 @@ CSV_FILENAME = os.path.join(PROJECT_DIR, 'data', 'sensor_data.csv')
 # Estado de la dirección/MAC conocida (puede cambiar en BLE)
 known_address: Optional[str] = None
 
+# Cliente activo y estado de notificación para limpieza garantizada
+active_client: Optional[BleakClient] = None
+notify_active: bool = False
+
+async def ble_cleanup():
+    """
+    Asegura detener notificaciones y desconectar del BLE pase lo que pase.
+    """
+    global active_client, notify_active
+    try:
+        client = active_client
+        if client is None:
+            return
+
+        # Intentar parar notificaciones primero
+        if notify_active:
+            try:
+                await client.stop_notify(BUFFER_CHAR_UUID)
+            except Exception:
+                # Ignorar errores de parada de notificación
+                pass
+            finally:
+                notify_active = False
+
+        # Desconectar si aún está conectado
+        try:
+            if getattr(client, "is_connected", False):
+                await client.disconnect()
+        except Exception:
+            # Ignorar errores de desconexión
+            pass
+    finally:
+        active_client = None
+        notify_active = False
+
 def process_buffer_data(buffer_data):
     """
     Procesa el buffer de datos y extrae temperatura, humedad y presión
@@ -171,33 +206,45 @@ async def connect_and_receive():
 
             print("🔗 Intentando conectar...")
             async with BleakClient(known_address, disconnected_callback=_on_disconnect) as client:
-                # Confirmación de conexión
-                if not client.is_connected:
-                    raise RuntimeError("No se pudo establecer la conexión")
+                # Exponer cliente activo para limpieza garantizada
+                global active_client, notify_active
+                active_client = client
+                try:
+                    # Confirmación de conexión
+                    if not client.is_connected:
+                        raise RuntimeError("No se pudo establecer la conexión")
 
-                print(f"✓ Conectado a {TARGET_NAME} @ {client.address}")
+                    print(f"✓ Conectado a {TARGET_NAME} @ {client.address}")
 
-                # Suscribirse a notificaciones del buffer
-                await client.start_notify(BUFFER_CHAR_UUID, notification_handler)
-                print("✓ Suscrito a notificaciones del buffer. Esperando datos...\n")
+                    # Suscribirse a notificaciones del buffer
+                    await client.start_notify(BUFFER_CHAR_UUID, notification_handler)
+                    notify_active = True
+                    print("✓ Suscrito a notificaciones del buffer. Esperando datos...\n")
 
-                # Resetear backoff tras conexión exitosa
-                backoff = 2
+                    # Resetear backoff tras conexión exitosa
+                    backoff = 2
 
-                # Esperar hasta que se dispare el evento de desconexión
-                await disconnected_event.wait()
+                    # Esperar hasta que se dispare el evento de desconexión
+                    await disconnected_event.wait()
+                finally:
+                    # Pase lo que pase, desconectar/limpiar antes de reintentar
+                    await ble_cleanup()
 
-            # Al salir del contexto, el cliente ya está cerrado. Volver a intentar.
+            # Volver a intentar tras limpieza
             print("↻ Intentando reconectar...")
             await asyncio.sleep(1)
 
         except asyncio.CancelledError:
+            # Limpieza también en cancelaciones
+            await ble_cleanup()
             raise
         except KeyboardInterrupt:
             print("\n✓ Programa terminado por el usuario")
+            await ble_cleanup()
             return
         except Exception as e:
             print(f"✗ Error de conexión/recepción: {e}")
+            await ble_cleanup()
             print(f"⏳ Reintentando en {backoff}s...")
             await asyncio.sleep(backoff)
             backoff = min(max_backoff, max(2, backoff * 2))
@@ -215,6 +262,12 @@ async def main():
         await connect_and_receive()
     except KeyboardInterrupt:
         print("\n✓ Programa terminado por el usuario")
+    finally:
+        # Última línea de defensa: limpiar BLE pase lo que pase
+        try:
+            await ble_cleanup()
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     asyncio.run(main())
