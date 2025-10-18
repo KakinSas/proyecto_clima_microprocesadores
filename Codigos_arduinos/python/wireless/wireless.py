@@ -91,9 +91,10 @@ def notification_handler(sender, data):
     # Mostrar en consola
     print(f"\nProcesando datos del buffer...")
     for i, record in enumerate(records, 1):
-        print(f"Registro {i} - Temp: {record['temperatura']} °C, "
-              f"Hum: {record['humedad']} %, Pres: {record['presion']} kPa")
-    
+        # Mostrar en consola (innecesario por el momento)
+        #print(f"Registro {i} - Temp: {record['temperatura']} °C, "
+        #      f"Hum: {record['humedad']} %, Pres: {record['presion']} kPa")
+        pass 
     # Guardar en CSV
     save_to_csv(records)
     print()
