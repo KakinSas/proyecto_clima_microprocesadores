@@ -42,5 +42,20 @@ desktop.ini
 
 # data
 
+# Modelos y archivos pesados (no subir a GitHub)
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.joblib
 
+# Datasets grandes
 modelos/modelo stefano/dataset_ml.csv
+*.csv
+
+# Predicciones y outputs generados
+modelos/predicciones_*.csv
+modelos/predicciones_*.png
+
+# Permitir sensor_data.csv (pequeño)
+!Codigos_arduinos/data/sensor_data.csv
