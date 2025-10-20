@@ -13,19 +13,15 @@ import numpy as np
 import pandas as pd
 import warnings
 from datetime import datetime, timedelta
-import argparse
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 
 def main():
-    parser = argparse.ArgumentParser(description='Predecir futuro o hacer preprocesado (dry-run)')
-    parser.add_argument('--dry-run', action='store_true', help='Solo preprocesar el CSV (resample 1min) y guardar muestra')
-    args = parser.parse_args()
     # Rutas
     base_dir = Path(__file__).resolve().parent
-    model_path = base_dir / "modelo_lstm_3_features.h5"
-    scaler_path = base_dir / "scaler_3_features.pkl"
+    model_path = base_dir / "modelo_lstm_3_features(1).h5"
+    scaler_path = base_dir / "scaler_4_features.pkl"
     csv_path = base_dir.parent / "Codigos_arduinos" / "data" / "sensor_data.csv"
     
     print("=" * 70)
@@ -33,64 +29,25 @@ def main():
     print("=" * 70)
     
     # 1. Verificar archivos
-    if args.dry_run:
-        # En modo dry-run solo necesitamos el CSV de datos
-        if not csv_path.exists():
-            print(f"❌ CSV no encontrado: {csv_path}")
-            sys.exit(1)
-        print(f"✅ Datos: {csv_path}")
-    else:
-        if not model_path.exists():
-            print(f"\n❌ Modelo no encontrado: {model_path}")
-            print(f"\n💡 Por favor, entrena el modelo primero ejecutando:")
-            print(f"   Abre y ejecuta: entrenar_modelo_simple.ipynb")
-            sys.exit(1)
-        
-        if not scaler_path.exists():
-            print(f"❌ Scaler no encontrado: {scaler_path}")
-            print(f"\n💡 Por favor, entrena el modelo primero.")
-            sys.exit(1)
-        
-        if not csv_path.exists():
-            print(f"❌ CSV no encontrado: {csv_path}")
-            sys.exit(1)
-        
-        print(f"✅ Modelo: {model_path.name}")
-        print(f"✅ Scaler: {scaler_path.name}")
-        print(f"✅ Datos: {csv_path}")
+    if not model_path.exists():
+        print(f"\n❌ Modelo no encontrado: {model_path}")
+        print(f"\n💡 Por favor, entrena el modelo primero ejecutando:")
+        print(f"   Abre y ejecuta: entrenar_modelo_simple.ipynb")
+        sys.exit(1)
     
-    # Si se solicita dry-run, solo hacer el preprocesado y salir (no cargar TF/modelo)
-    if args.dry_run:
-        print("\n🧪 MODO dry-run: solo preprocesado (resample a 1 minuto)")
-        try:
-            # Cargar CSV y aplicar resample similar al script de comprobación
-            df = pd.read_csv(csv_path)
-            print(f"   Total de registros (raw): {len(df):,}")
-
-            if 'timestamp' in df.columns:
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
-                cols = ['timestamp', 'temperatura', 'humedad', 'presion']
-                missing = [c for c in cols if c not in df.columns]
-                if missing:
-                    print(f"Faltan columnas necesarias para resample: {missing}")
-                    return
-
-                df_num = df[cols].copy()
-                for c in ['temperatura', 'humedad', 'presion']:
-                    df_num[c] = pd.to_numeric(df_num[c], errors='coerce')
-
-                df_res = df_num.set_index('timestamp').resample('1min').mean().dropna().reset_index()
-                outp = base_dir / 'sensor_data_resampled.csv'
-                df_res.to_csv(outp, index=False)
-                print(f"   ✅ Resample completado. Filas resultantes: {len(df_res):,}")
-                print(f"   Muestra guardada en: {outp}")
-            else:
-                print("   ⚠️ No hay columna 'timestamp' en el CSV; nada que resamplear")
-            return
-        except Exception as e:
-            print(f"   ❌ Error en dry-run: {e}")
-            return
-
+    if not scaler_path.exists():
+        print(f"❌ Scaler no encontrado: {scaler_path}")
+        print(f"\n💡 Por favor, entrena el modelo primero.")
+        sys.exit(1)
+    
+    if not csv_path.exists():
+        print(f"❌ CSV no encontrado: {csv_path}")
+        sys.exit(1)
+    
+    print(f"✅ Modelo: {model_path.name}")
+    print(f"✅ Scaler: {scaler_path.name}")
+    print(f"✅ Datos: {csv_path}")
+    
     # 2. Cargar modelo
     try:
         import tensorflow as tf
@@ -277,7 +234,7 @@ def main():
     temp_std = predicciones_reales.std()
     
     print(f"\n🌡️  Temperatura actual (última en dataset): {ultima_temp_real:.2f} °C")
-    print(f"🔮 Primera predicción (+1min):             {primera_pred:.2f} °C")
+    print(f"🔮 Primera predicción (+1s):               {primera_pred:.2f} °C")
     print(f"🔮 Última predicción (+6h):                {ultima_pred:.2f} °C")
     print(f"\n📈 Estadísticas de las próximas 6 horas:")
     print(f"   Temperatura mínima:    {temp_min:.2f} °C")
