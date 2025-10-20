@@ -13,11 +13,15 @@ import numpy as np
 import pandas as pd
 import warnings
 from datetime import datetime, timedelta
+import argparse
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 
 def main():
+    parser = argparse.ArgumentParser(description='Predecir futuro o hacer preprocesado (dry-run)')
+    parser.add_argument('--dry-run', action='store_true', help='Solo preprocesar el CSV (resample 1min) y guardar muestra')
+    args = parser.parse_args()
     # Rutas
     base_dir = Path(__file__).resolve().parent
     model_path = base_dir / "modelo_lstm_3_features.h5"
@@ -29,25 +33,64 @@ def main():
     print("=" * 70)
     
     # 1. Verificar archivos
-    if not model_path.exists():
-        print(f"\n❌ Modelo no encontrado: {model_path}")
-        print(f"\n💡 Por favor, entrena el modelo primero ejecutando:")
-        print(f"   Abre y ejecuta: entrenar_modelo_simple.ipynb")
-        sys.exit(1)
+    if args.dry_run:
+        # En modo dry-run solo necesitamos el CSV de datos
+        if not csv_path.exists():
+            print(f"❌ CSV no encontrado: {csv_path}")
+            sys.exit(1)
+        print(f"✅ Datos: {csv_path}")
+    else:
+        if not model_path.exists():
+            print(f"\n❌ Modelo no encontrado: {model_path}")
+            print(f"\n💡 Por favor, entrena el modelo primero ejecutando:")
+            print(f"   Abre y ejecuta: entrenar_modelo_simple.ipynb")
+            sys.exit(1)
+        
+        if not scaler_path.exists():
+            print(f"❌ Scaler no encontrado: {scaler_path}")
+            print(f"\n💡 Por favor, entrena el modelo primero.")
+            sys.exit(1)
+        
+        if not csv_path.exists():
+            print(f"❌ CSV no encontrado: {csv_path}")
+            sys.exit(1)
+        
+        print(f"✅ Modelo: {model_path.name}")
+        print(f"✅ Scaler: {scaler_path.name}")
+        print(f"✅ Datos: {csv_path}")
     
-    if not scaler_path.exists():
-        print(f"❌ Scaler no encontrado: {scaler_path}")
-        print(f"\n💡 Por favor, entrena el modelo primero.")
-        sys.exit(1)
-    
-    if not csv_path.exists():
-        print(f"❌ CSV no encontrado: {csv_path}")
-        sys.exit(1)
-    
-    print(f"✅ Modelo: {model_path.name}")
-    print(f"✅ Scaler: {scaler_path.name}")
-    print(f"✅ Datos: {csv_path}")
-    
+    # Si se solicita dry-run, solo hacer el preprocesado y salir (no cargar TF/modelo)
+    if args.dry_run:
+        print("\n🧪 MODO dry-run: solo preprocesado (resample a 1 minuto)")
+        try:
+            # Cargar CSV y aplicar resample similar al script de comprobación
+            df = pd.read_csv(csv_path)
+            print(f"   Total de registros (raw): {len(df):,}")
+
+            if 'timestamp' in df.columns:
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                cols = ['timestamp', 'temperatura', 'humedad', 'presion']
+                missing = [c for c in cols if c not in df.columns]
+                if missing:
+                    print(f"Faltan columnas necesarias para resample: {missing}")
+                    return
+
+                df_num = df[cols].copy()
+                for c in ['temperatura', 'humedad', 'presion']:
+                    df_num[c] = pd.to_numeric(df_num[c], errors='coerce')
+
+                df_res = df_num.set_index('timestamp').resample('1min').mean().dropna().reset_index()
+                outp = base_dir / 'sensor_data_resampled.csv'
+                df_res.to_csv(outp, index=False)
+                print(f"   ✅ Resample completado. Filas resultantes: {len(df_res):,}")
+                print(f"   Muestra guardada en: {outp}")
+            else:
+                print("   ⚠️ No hay columna 'timestamp' en el CSV; nada que resamplear")
+            return
+        except Exception as e:
+            print(f"   ❌ Error en dry-run: {e}")
+            return
+
     # 2. Cargar modelo
     try:
         import tensorflow as tf
@@ -71,7 +114,31 @@ def main():
     # 4. Cargar CSV
     print(f"\n📊 Cargando datos...")
     df = pd.read_csv(csv_path)
-    print(f"   Total de registros: {len(df):,}")
+    print(f"   Total de registros (raw): {len(df):,}")
+
+    # Intentar parsear timestamp y resamplear a 1 minuto (promediando cada ~60s)
+    # Notas: los datos originales tienen un registro por segundo, pero hay 12 datos por segundo
+    # según la descripción; para obtener 1 dato por minuto se toma la media de los 60*12=720 registros
+    # por minuto si corresponde. Aquí manejamos casos donde la densidad no sea exacta usando resample.
+    if 'timestamp' in df.columns:
+        try:
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            df = df.set_index('timestamp')
+
+            # Si hay múltiples columnas no-numéricas, se intentará convertir sólo las features necesarias
+            # Resample a 1 minuto y tomar la media. Esto producirá 1 fila por minuto.
+            df_min = df.resample('1T').mean()
+
+            # Eliminar filas NaN que puedan aparecer por huecos
+            df_min = df_min.dropna()
+
+            print(f"   Registros después de resample a 1 minuto: {len(df_min):,}")
+            df = df_min.reset_index()
+        except Exception as e:
+            print(f"   ⚠️ Error al parsear/resamplear timestamps: {e}")
+            print("   Usando los datos raw sin resampleo")
+    else:
+        print("   ⚠️ No hay columna 'timestamp' en el CSV; usando datos sin resampleo")
     
     # Mapeo de columnas: sensor_data.csv → modelo (ts, hr, p0)
     feature_mapping = {
@@ -92,19 +159,19 @@ def main():
     print(f"   Mapeadas a: {list(feature_mapping.values())}")
     
     # 5. Configuración de predicción
-    n_pasos = 24  # Ventana de tiempo que usa el modelo
+    n_pasos = 24  # Ventana de tiempo que usa el modelo (ahora cada paso es 1 minuto)
     horas_futuro = 6
-    segundos_por_hora = 3600
-    n_predicciones = horas_futuro * segundos_por_hora
+    minutos_por_hora = 60
+    n_predicciones = horas_futuro * minutos_por_hora  # 1 predicción por minuto
     
     print(f"\n⚙️  CONFIGURACIÓN DE PREDICCIÓN")
     print(f"   Ventana temporal (timesteps): {n_pasos}")
     print(f"   Horas a predecir: {horas_futuro}")
-    print(f"   Predicciones totales: {n_predicciones:,} (1 por segundo)")
+    print(f"   Predicciones totales: {n_predicciones:,} (1 por minuto)")
     
     # 6. Verificar que hay suficientes datos
     if len(X_raw) < n_pasos:
-        print(f"\n❌ Datos insuficientes. Se necesitan al menos {n_pasos} registros")
+        print(f"\n❌ Datos insuficientes. Se necesitan al menos {n_pasos} registros (1 por minuto después del resample)")
         sys.exit(1)
     
     # 7. Escalar datos históricos
@@ -114,7 +181,7 @@ def main():
     ultima_ventana = X_scaled[-n_pasos:].copy()  # Últimos 24 registros
     
     print(f"\n🔄 Generando predicciones iterativas...")
-    print(f"   (Esto puede tomar algunos minutos)")
+    print(f"   (Esto debería ser rápido: {n_predicciones:,} predicciones por minuto)")
     
     # 9. Predicción iterativa
     predicciones_temp = []
@@ -129,7 +196,7 @@ def main():
             progreso = ((i + 1) / n_predicciones) * 100
             print(f"   Progreso: {progreso:.1f}% ({i+1:,}/{n_predicciones:,})")
         
-        # Preparar entrada para el modelo (1, n_pasos, 3)
+    # Preparar entrada para el modelo (1, n_pasos, 3)
         X_input = ventana_actual.reshape(1, n_pasos, 3)
         
         # Predecir siguiente valor (temperatura escalada)
@@ -179,16 +246,16 @@ def main():
         ultimo_timestamp = datetime.now()
         print(f"   No hay columna timestamp, usando: {ultimo_timestamp}")
     
-    # Generar timestamps futuros (1 por segundo)
-    timestamps_futuros = [ultimo_timestamp + timedelta(seconds=i+1) for i in range(n_predicciones)]
+    # Generar timestamps futuros (1 por minuto)
+    timestamps_futuros = [ultimo_timestamp + timedelta(minutes=i+1) for i in range(n_predicciones)]
     
     # 12. Crear DataFrame de resultados
     resultado_df = pd.DataFrame({
         'timestamp': timestamps_futuros,
         'temperatura_predicha': predicciones_reales,
-        'segundos_desde_inicio': range(1, n_predicciones + 1),
-        'minutos_desde_inicio': [(i + 1) / 60 for i in range(n_predicciones)],
-        'horas_desde_inicio': [(i + 1) / 3600 for i in range(n_predicciones)]
+        'segundos_desde_inicio': [ (i+1)*60 for i in range(n_predicciones)],
+        'minutos_desde_inicio': range(1, n_predicciones + 1),
+        'horas_desde_inicio': [(i + 1) / 60 for i in range(n_predicciones)]
     })
     
     # 13. Guardar resultados
@@ -210,7 +277,7 @@ def main():
     temp_std = predicciones_reales.std()
     
     print(f"\n🌡️  Temperatura actual (última en dataset): {ultima_temp_real:.2f} °C")
-    print(f"🔮 Primera predicción (+1s):               {primera_pred:.2f} °C")
+    print(f"🔮 Primera predicción (+1min):             {primera_pred:.2f} °C")
     print(f"🔮 Última predicción (+6h):                {ultima_pred:.2f} °C")
     print(f"\n📈 Estadísticas de las próximas 6 horas:")
     print(f"   Temperatura mínima:    {temp_min:.2f} °C")
@@ -228,13 +295,13 @@ def main():
     print("-" * 50)
     
     momentos = [
-        (0, "Inicio (+1s)"),
-        (60*15-1, "+15 minutos"),
-        (60*30-1, "+30 minutos"),
-        (60*60-1, "+1 hora"),
-        (60*60*2-1, "+2 horas"),
-        (60*60*3-1, "+3 horas"),
-        (60*60*6-1, "+6 horas")
+        (0, "Inicio (+1min)"),
+        (15-1, "+15 minutos"),
+        (30-1, "+30 minutos"),
+        (60-1, "+1 hora"),
+        (60*2-1, "+2 horas"),
+        (60*3-1, "+3 horas"),
+        (60*6-1, "+6 horas")
     ]
     
     for idx, label in momentos:
