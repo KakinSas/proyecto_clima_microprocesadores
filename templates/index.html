@@ -40,7 +40,7 @@
         <!-- DATOS PREDECIDOS -->
         <div>
           <h2>Predicciones futuras</h2>
-          <label for="horasSelect">Mostrar predicciones para:</label>
+          <label class="select-label" for="horasSelect">Predecir hasta:</label>
           <select id="horasSelect">
             <option value="1">1 hora</option>
             <option value="2">2 horas</option>
@@ -50,6 +50,7 @@
             <option value="6" selected>6 horas</option>
           </select>
           <button id="btnPredecir">Generar predicciones</button>
+          <div id="statusMessage" style="margin-top: 10px; font-weight: bold;"></div>
 
           <div class="card">
             <table class="table" id="tabla_predicciones">
@@ -92,6 +93,11 @@
       }
     } catch (e) {
       console.error('Error fetchLatestSensor', e);
+      // Mostrar error visual en la tabla
+      const card = document.querySelectorAll('.div_predicciones .card')[0];
+      card.querySelectorAll('tbody tr').forEach(row => {
+        row.cells[1].innerText = 'Error';
+      });
     }
   }
 
@@ -121,7 +127,19 @@
   }
 
   async function runPrediction(horas) {
+    const statusDiv = document.getElementById('statusMessage');
+    const btnPredecir = document.getElementById('btnPredecir');
+    
     try {
+      statusDiv.style.color = '#2196F3';
+      statusDiv.innerText = '🔄 Generando predicciones...';
+      btnPredecir.disabled = true;
+      
+      // Obtener cantidad de predicciones antes
+      const respBefore = await fetch('/api/predictions/future?limit=1');
+      const dataBefore = await respBefore.json();
+      const countBefore = dataBefore.length;
+      
       const resp = await fetch('/api/predict', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -129,10 +147,41 @@
       });
       const result = await resp.json();
       console.log(result.message);
+      
+      statusDiv.innerText = '⏳ Procesando datos...';
+      
       // Esperamos unos segundos para que el hilo termine
-      setTimeout(() => fetchFuturePredictions(horas), 3000);
+      setTimeout(async () => {
+        // Verificar si realmente se generaron predicciones nuevas
+        const respAfter = await fetch('/api/predictions/future?limit=1');
+        const dataAfter = await respAfter.json();
+        const countAfter = dataAfter.length;
+        
+        if (countAfter > countBefore || (dataAfter.length > 0 && dataBefore.length > 0 && dataAfter[0].prediction_time !== dataBefore[0].prediction_time)) {
+          await fetchFuturePredictions(horas);
+          statusDiv.style.color = '#4CAF50';
+          statusDiv.innerText = '✓ Predicciones actualizadas correctamente';
+        } else {
+          statusDiv.style.color = '#f44336';
+          statusDiv.innerText = '✗ Error: No se generaron predicciones. Verifica los logs del servidor.';
+        }
+        
+        btnPredecir.disabled = false;
+        
+        // Limpiar mensaje después de 5 segundos
+        setTimeout(() => {
+          statusDiv.innerText = '';
+        }, 5000);
+      }, 4000);
     } catch (e) {
       console.error('Error runPrediction', e);
+      statusDiv.style.color = '#f44336';
+      statusDiv.innerText = '✗ Error al generar predicciones: ' + e.message;
+      btnPredecir.disabled = false;
+      
+      setTimeout(() => {
+        statusDiv.innerText = '';
+      }, 5000);
     }
   }
 
@@ -148,6 +197,11 @@
       }
     } catch (e) {
       console.error('Error fetchRealWeather', e);
+      // Mostrar error visual en la tabla
+      const card = document.querySelectorAll('.div_predicciones .card')[2];
+      card.querySelectorAll('tbody tr').forEach(row => {
+        row.cells[1].innerText = 'Error';
+      });
     }
   }
 

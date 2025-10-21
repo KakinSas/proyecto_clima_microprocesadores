@@ -56,19 +56,41 @@ def api_predict():
     payload = request.get_json(silent=True) or {}
     horas = int(payload.get('horas_futuro', 6))
 
+    # Variable compartida para capturar errores
+    prediction_result = {"status": "running", "error": None}
+
     # Ejecutar la predicción en un hilo para no bloquear (puedes cambiar si quieres bloqueante)
     def run_prediction():
         try:
             output_csv = predecir.run_prediction(horas_futuro=horas)
             # leer CSV y guardar en DB
             database.insert_predictions_from_csv(output_csv)
+            prediction_result["status"] = "success"
         except Exception as e:
             app.logger.error(f"Error en predicción: {e}")
+            prediction_result["status"] = "error"
+            prediction_result["error"] = str(e)
 
     thread = threading.Thread(target=run_prediction)
     thread.start()
 
     return jsonify({"status":"running", "message": f"Predicción por {horas} horas iniciada en background."}), 202
+
+# Endpoint para verificar el estado de la última predicción
+@app.route('/api/predict/status', methods=['GET'])
+def api_predict_status():
+    """
+    GET /api/predict/status
+    Devuelve si hay predicciones en la base de datos
+    """
+    try:
+        preds = database.get_future_predictions()
+        if preds and len(preds) > 0:
+            return jsonify({"status": "success", "count": len(preds)}), 200
+        else:
+            return jsonify({"status": "no_data", "count": 0}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

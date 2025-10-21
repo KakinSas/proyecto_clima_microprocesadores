@@ -38,7 +38,7 @@ def init_database():
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
             prediction_time DATETIME NOT NULL,
             temperatura_pred REAL NOT NULL,
-            humedad_pred REAL NOT NULL,
+            humedad_pred REAL,
             presion_pred REAL,
             confidence REAL,
             model_version TEXT,
