@@ -1,114 +1,174 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mi Página Web</title>
-    <link rel="stylesheet" href="/static/css/styles.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Predicción Climática</title>
+  <link rel="stylesheet" href="/static/css/styles.css">
+  <style>
+    select {
+      margin: 8px 0;
+      padding: 5px;
+      font-size: 1em;
+    }
+  </style>
 </head>
 <body>
-    <header>
-        <a href="/"><img src="/static/weather.png" alt="Logo de la Página" class="logo"></a>
-        <h1>Predicción de datos del clima</h1>
-    </header>
-    <main>
-        <div class="container">
-            <div class="div_predicciones">
-                <div>
-                    <h2>Datos percibidos</h2>
-                    <div class="card">
-                        <table class="table">
-                            <thead>
-                                <tr>
-                                    <th>Métrica</th>
-                                    <th>Valor</th>
-                                    <th>Unidad</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>Temperatura</td>
-                                    <td>-</td>
-                                    <td>°C</td>
-                                </tr>
-                                <tr>
-                                    <td>Humedad</td>
-                                    <td>-</td>
-                                    <td>%</td>
-                                </tr>
-                                <tr>
-                                    <td>Presión</td>
-                                    <td>-</td>
-                                    <td>hPa</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-                <div>
-                    <h2>Datos predecidos</h2>
-                    <div class="card">
-                        <table class="table">
-                            <thead>
-                                <tr>
-                                    <th>Métrica</th>
-                                    <th>Valor</th>
-                                    <th>Unidad</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>Temperatura</td>
-                                    <td>-</td>
-                                    <td>°C</td>
-                                </tr>
-                                <tr>
-                                    <td>Humedad</td>
-                                    <td>-</td>
-                                    <td>%</td>
-                                </tr>
-                                <tr>
-                                    <td>Presión</td>
-                                    <td>-</td>
-                                    <td>hPa</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-                <div>
-                    <h2>Datos reales</h2>
-                    <div class="card">
-                        <table class="table">
-                            <thead>
-                                <tr>
-                                    <th>Métrica</th>
-                                    <th>Valor</th>
-                                    <th>Unidad</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>Temperatura</td>
-                                    <td>-</td>
-                                    <td>°C</td>
-                                </tr>
-                                <tr>
-                                    <td>Humedad</td>
-                                    <td>-</td>
-                                    <td>%</td>
-                                </tr>
-                                <tr>
-                                    <td>Presión</td>
-                                    <td>-</td>
-                                    <td>hPa</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+  <header>
+    <a href="/"><img src="/static/weather.png" alt="Logo" class="logo"></a>
+    <h1>Predicción de datos del clima</h1>
+  </header>
+  <main>
+    <div class="container">
+      <div class="div_predicciones">
+
+        <!-- DATOS SENSOR -->
+        <div>
+          <h2>Datos percibidos (sensor)</h2>
+          <div class="card">
+            <table class="table">
+              <thead><tr><th>Métrica</th><th>Valor</th><th>Unidad</th></tr></thead>
+              <tbody>
+                <tr><td>Temperatura</td><td>-</td><td>°C</td></tr>
+                <tr><td>Humedad</td><td>-</td><td>%</td></tr>
+                <tr><td>Presión</td><td>-</td><td>hPa</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
-    </main>
+
+        <!-- DATOS PREDECIDOS -->
+        <div>
+          <h2>Predicciones futuras</h2>
+          <label for="horasSelect">Mostrar predicciones para:</label>
+          <select id="horasSelect">
+            <option value="1">1 hora</option>
+            <option value="2">2 horas</option>
+            <option value="3">3 horas</option>
+            <option value="4">4 horas</option>
+            <option value="5">5 horas</option>
+            <option value="6" selected>6 horas</option>
+          </select>
+          <button id="btnPredecir">Generar predicciones</button>
+
+          <div class="card">
+            <table class="table" id="tabla_predicciones">
+              <thead><tr><th>Hora (+)</th><th>Temperatura (°C)</th><th>Humedad (%)</th><th>Presión (hPa)</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- CLIMA REAL -->
+        <div>
+          <h2>Datos reales (clima actual)</h2>
+          <div class="card">
+            <table class="table">
+              <thead><tr><th>Métrica</th><th>Valor</th><th>Unidad</th></tr></thead>
+              <tbody>
+                <tr><td>Temperatura</td><td>-</td><td>°C</td></tr>
+                <tr><td>Humedad</td><td>-</td><td>%</td></tr>
+                <tr><td>Presión</td><td>-</td><td>hPa</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <script>
+  async function fetchLatestSensor() {
+    try {
+      const resp = await fetch('/api/sensor/latest?limit=1');
+      const data = await resp.json();
+      if (data && data.length) {
+        const latest = data[0];
+        const card = document.querySelectorAll('.div_predicciones .card')[0];
+        card.querySelectorAll('tbody tr')[0].cells[1].innerText = latest.temperatura.toFixed(2);
+        card.querySelectorAll('tbody tr')[1].cells[1].innerText = latest.humedad.toFixed(2);
+        card.querySelectorAll('tbody tr')[2].cells[1].innerText = latest.presion ? latest.presion.toFixed(2) : '-';
+      }
+    } catch (e) {
+      console.error('Error fetchLatestSensor', e);
+    }
+  }
+
+  async function fetchFuturePredictions(limit) {
+    try {
+      const resp = await fetch(`/api/predictions/future?limit=${limit}`);
+      const data = await resp.json();
+      const tbody = document.querySelector('#tabla_predicciones tbody');
+      tbody.innerHTML = '';
+      if (data && data.length) {
+        data.forEach((pred, idx) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>+${idx + 1} h</td>
+            <td>${pred.temperatura_pred?.toFixed(2) ?? '-'}</td>
+            <td>${pred.humedad_pred?.toFixed(2) ?? '-'}</td>
+            <td>${pred.presion_pred?.toFixed(2) ?? '-'}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      } else {
+        tbody.innerHTML = '<tr><td colspan="4">Sin datos</td></tr>';
+      }
+    } catch (e) {
+      console.error('Error fetchFuturePredictions', e);
+    }
+  }
+
+  async function runPrediction(horas) {
+    try {
+      const resp = await fetch('/api/predict', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ horas_futuro: horas })
+      });
+      const result = await resp.json();
+      console.log(result.message);
+      // Esperamos unos segundos para que el hilo termine
+      setTimeout(() => fetchFuturePredictions(horas), 3000);
+    } catch (e) {
+      console.error('Error runPrediction', e);
+    }
+  }
+
+  async function fetchRealWeather() {
+    try {
+      const resp = await fetch('/api/weather/real');
+      const real = await resp.json();
+      if (real) {
+        const card = document.querySelectorAll('.div_predicciones .card')[2];
+        card.querySelectorAll('tbody tr')[0].cells[1].innerText = real.temperatura.toFixed(2);
+        card.querySelectorAll('tbody tr')[1].cells[1].innerText = real.humedad.toFixed(2);
+        card.querySelectorAll('tbody tr')[2].cells[1].innerText = real.presion ? real.presion.toFixed(2) : '-';
+      }
+    } catch (e) {
+      console.error('Error fetchRealWeather', e);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const selectHoras = document.getElementById('horasSelect');
+    const btnPredecir = document.getElementById('btnPredecir');
+
+    fetchLatestSensor();
+    fetchFuturePredictions(parseInt(selectHoras.value));
+    fetchRealWeather();
+
+    btnPredecir.addEventListener('click', () => {
+      const horas = parseInt(selectHoras.value);
+      runPrediction(horas);
+    });
+
+    setInterval(() => {
+      fetchLatestSensor();
+      fetchRealWeather();
+    }, 60 * 1000);
+  });
+  </script>
 </body>
 </html>

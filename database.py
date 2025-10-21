@@ -1,54 +1,37 @@
+# --- partes superiores iguales (imports) ---
 import sqlite3
 import os
 from datetime import datetime, timedelta
 import pytz
+import pandas as pd
 
-# Configuración
 DB_FOLDER = 'data'
 DB_NAME = 'clima.db'
 DB_PATH = os.path.join(DB_FOLDER, DB_NAME)
-
-# Zona horaria de Chile
 TIMEZONE = pytz.timezone('America/Santiago')
 
-
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row  # Permite acceder a columnas por nombre
+    conn = sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
+    conn.row_factory = sqlite3.Row
     return conn
 
-
 def init_database():
-    """
-    Inicializa la base de datos creando las tablas necesarias si no existen.
-    
-    Tablas:
-    - sensor_data: Datos capturados por los sensores
-    - predictions: Predicciones del modelo ML
-    """
     if not os.path.exists(DB_FOLDER):
         os.makedirs(DB_FOLDER)
-        print(f"Carpeta '{DB_FOLDER}' creada.")
-    
     conn = get_db_connection()
     cursor = conn.cursor()
-    
-    # Tabla para datos de sensores
+
+    # Crear tabla sensor_data SIN sensor_id ni ubicacion
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS sensor_data (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            timestamp DATETIME NOT NULL,
             temperatura REAL NOT NULL,
             humedad REAL NOT NULL,
-            presion REAL,
-            sensor_id TEXT NOT NULL,
-            ubicacion TEXT,
-            CONSTRAINT check_temperatura CHECK (temperatura BETWEEN -50 AND 60),
-            CONSTRAINT check_humedad CHECK (humedad BETWEEN 0 AND 100)
+            presion REAL
         )
     ''')
-    
-    # Tabla para predicciones del modelo
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS predictions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,319 +45,185 @@ def init_database():
             CONSTRAINT check_confidence CHECK (confidence BETWEEN 0 AND 1)
         )
     ''')
-    
-    # Índices para mejorar consultas por fecha
-    cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_sensor_timestamp 
-        ON sensor_data(timestamp)
-    ''')
-    
-    cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_prediction_timestamp 
-        ON predictions(timestamp)
-    ''')
-    
+
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_sensor_timestamp ON sensor_data(timestamp)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_prediction_time ON predictions(prediction_time)')
     conn.commit()
     conn.close()
-    
-    print("Base de datos inicializada correctamente.")
 
-
-# ==================== FUNCIONES PARA DATOS DE SENSORES ====================
-
-def insert_sensor_data(temperatura, humedad, presion=None, sensor_id='arduino_1', ubicacion='Lab'):
-    """
-    Inserta un nuevo registro de datos de sensor.
-    
-    Args:
-        temperatura (float): Temperatura en grados Celsius
-        humedad (float): Humedad relativa en porcentaje
-        presion (float, optional): Presión atmosférica en hPa
-        sensor_id (str): Identificador del sensor/Arduino
-        
-    Returns:
-        int: ID del registro insertado
-    """
+# --- Insert sensor data simplified (sin sensor_id, ubicacion) ---
+def insert_sensor_data(temperatura, humedad, presion=None, timestamp=None):
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+    if timestamp is None:
+        timestamp = datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S')
     cursor.execute('''
-        INSERT INTO sensor_data (temperatura, humedad, presion, sensor_id, ubicacion)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (temperatura, humedad, presion, sensor_id, ubicacion))
-    
+        INSERT INTO sensor_data (timestamp, temperatura, humedad, presion)
+        VALUES (?, ?, ?, ?)
+    ''', (timestamp, temperatura, humedad, presion))
     record_id = cursor.lastrowid
     conn.commit()
     conn.close()
-    
     return record_id
 
+# --- Nueva función: carga CSV y agrega por minuto ---
+def load_csv_and_aggregate_to_db(csv_path=None):
+    """
+    Lee Codigos_arduinos/data/sensor_data.csv, agrupa por minuto (promedio)
+    e inserta/regenera la tabla sensor_data.
+    Si csv_path es None, usa la ruta por defecto.
+    """
+    base_dir = os.path.dirname(__file__)
+    default_path = os.path.join(base_dir, "Codigos_arduinos", "data", "sensor_data.csv")
+    csv_path = csv_path or default_path
 
-def get_latest_sensor_data(limit=10):
-    """
-    Obtiene los últimos N registros de sensores.
-    
-    Args:
-        limit (int): Número de registros a obtener
-        
-    Returns:
-        list: Lista de diccionarios con los datos
-    """
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"CSV no encontrado en {csv_path}")
+
+    df = pd.read_csv(csv_path)
+
+    # Intentar detectar columna timestamp; si no existe asumir existe 'time' o crear desde índice
+    if 'timestamp' not in df.columns:
+        # intentar columnas comunes
+        if 'time' in df.columns:
+            df['timestamp'] = df['time']
+        else:
+            # si no existe, crear timestamps secuenciales a partir de ahora - len rows
+            df['timestamp'] = pd.date_range(end=pd.Timestamp.now(), periods=len(df), freq='S')
+
+    # Parsear timestamps
+    df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+    if df['timestamp'].isnull().any():
+        # fallback: si hay strings tipo unix epoch
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s', errors='coerce')
+
+    # Asegurar columnas temperatura, humedad, presion
+    required = ['temperatura', 'humedad']
+    for r in required:
+        if r not in df.columns:
+            raise ValueError(f"Columna requerida no encontrada en CSV: {r}")
+
+    if 'presion' not in df.columns:
+        df['presion'] = None
+
+    # Convertir a timezone local si es naive
+    df['timestamp'] = df['timestamp'].dt.tz_localize(None)
+
+    # Agrupar por minuto: redondear timestamp a minuto y promediar
+    df['timestamp_min'] = df['timestamp'].dt.floor('T')  # 'T' es minuto
+    agg = df.groupby('timestamp_min').agg({
+        'temperatura': 'mean',
+        'humedad': 'mean',
+        'presion': 'mean'
+    }).reset_index().rename(columns={'timestamp_min':'timestamp'})
+
+    # Insertar o reemplazar datos en la tabla sensor_data
     conn = get_db_connection()
     cursor = conn.cursor()
-    
-    cursor.execute('''
-        SELECT * FROM sensor_data 
-        ORDER BY timestamp DESC 
-        LIMIT ?
-    ''', (limit,))
-    
-    rows = cursor.fetchall()
+
+    # Aquí elegimos vaciar la tabla y reinsertar (simplifica migraciones)
+    cursor.execute('DELETE FROM sensor_data')
+    conn.commit()
+
+    insert_q = 'INSERT INTO sensor_data (timestamp, temperatura, humedad, presion) VALUES (?, ?, ?, ?)'
+    records = [(row['timestamp'].strftime('%Y-%m-%d %H:%M:%S'), 
+                float(row['temperatura']) if not pd.isna(row['temperatura']) else None,
+                float(row['humedad']) if not pd.isna(row['humedad']) else None,
+                float(row['presion']) if not pd.isna(row['presion']) else None) 
+               for _, row in agg.iterrows()]
+
+    cursor.executemany(insert_q, records)
+    conn.commit()
     conn.close()
-    
-    # Convertir a lista de diccionarios
-    result = []
-    for row in rows:
-        result.append({
-            'id': row['id'],
-            'timestamp': row['timestamp'],
-            'temperatura': row['temperatura'],
-            'humedad': row['humedad'],
-            'presion': row['presion'],
-            'sensor_id': row['sensor_id'],
-            'ubicacion': row['ubicacion'] if 'ubicacion' in row.keys() else None
-        })
-    
-    return result
+    return len(records)
 
-
-def get_sensor_data_by_range(start_date, end_date):
-    """
-    Obtiene datos de sensores en un rango de fechas.
-    
-    Args:
-        start_date (str): Fecha inicial (formato: 'YYYY-MM-DD HH:MM:SS')
-        end_date (str): Fecha final (formato: 'YYYY-MM-DD HH:MM:SS')
-        
-    Returns:
-        list: Lista de diccionarios con los datos
-    """
+# --- Insert predictions desde CSV generado por predecir_futuro ---
+def insert_prediction(prediction_time, temperatura_pred, humedad_pred, presion_pred=None, confidence=None, model_version='v1.0'):
     conn = get_db_connection()
     cursor = conn.cursor()
-    
-    cursor.execute('''
-        SELECT * FROM sensor_data 
-        WHERE timestamp BETWEEN ? AND ?
-        ORDER BY timestamp ASC
-    ''', (start_date, end_date))
-    
-    rows = cursor.fetchall()
-    conn.close()
-    
-    result = []
-    for row in rows:
-        result.append({
-            'id': row['id'],
-            'timestamp': row['timestamp'],
-            'temperatura': row['temperatura'],
-            'humedad': row['humedad'],
-            'presion': row['presion'],
-            'sensor_id': row['sensor_id'],
-            'ubicacion': row['ubicacion']
-        })
-    
-    return result
-
-
-def get_sensor_stats():
-    """
-    Obtiene estadísticas de los datos de sensores.
-    
-    Returns:
-        dict: Diccionario con promedios, máximos y mínimos
-    """
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        SELECT 
-            AVG(temperatura) as temp_promedio,
-            MAX(temperatura) as temp_max,
-            MIN(temperatura) as temp_min,
-            AVG(humedad) as humedad_promedio,
-            MAX(humedad) as humedad_max,
-            MIN(humedad) as humedad_min,
-            AVG(presion) as presion_promedio,
-            COUNT(*) as total_registros
-        FROM sensor_data
-    ''')
-    
-    row = cursor.fetchone()
-    conn.close()
-    
-    return {
-        'temperatura': {
-            'promedio': round(row['temp_promedio'], 2) if row['temp_promedio'] else None,
-            'max': row['temp_max'],
-            'min': row['temp_min']
-        },
-        'humedad': {
-            'promedio': round(row['humedad_promedio'], 2) if row['humedad_promedio'] else None,
-            'max': row['humedad_max'],
-            'min': row['humedad_min']
-        },
-        'presion': {
-            'promedio': round(row['presion_promedio'], 2) if row['presion_promedio'] else None
-        },
-        'total_registros': row['total_registros']
-    }
-
-
-# ==================== FUNCIONES PARA PREDICCIONES ====================
-
-def insert_prediction(prediction_time, temperatura_pred, humedad_pred, 
-                     presion_pred=None, confidence=None, model_version='v1.0'):
-    """
-    Inserta una nueva predicción del modelo.
-    
-    Args:
-        prediction_time (str): Hora para la cual se hace la predicción
-        temperatura_pred (float): Temperatura predicha
-        humedad_pred (float): Humedad predicha
-        presion_pred (float, optional): Presión predicha
-        confidence (float, optional): Nivel de confianza de la predicción (0-1)
-        model_version (str): Versión del modelo ML
-        
-    Returns:
-        int: ID del registro insertado
-    """
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
     cursor.execute('''
         INSERT INTO predictions 
         (prediction_time, temperatura_pred, humedad_pred, presion_pred, confidence, model_version)
         VALUES (?, ?, ?, ?, ?, ?)
     ''', (prediction_time, temperatura_pred, humedad_pred, presion_pred, confidence, model_version))
-    
     record_id = cursor.lastrowid
     conn.commit()
     conn.close()
-    
     return record_id
 
+def insert_predictions_from_csv(csv_path):
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(csv_path)
+    df = pd.read_csv(csv_path)
+    # Esperamos columnas: timestamp (o prediction_time), temperatura_predicha
+    if 'timestamp' in df.columns:
+        pred_time_col = 'timestamp'
+    elif 'prediction_time' in df.columns:
+        pred_time_col = 'prediction_time'
+    else:
+        raise ValueError("CSV de predicciones no tiene columna 'timestamp' ni 'prediction_time'")
 
-def get_latest_predictions(limit=10):
+    for _, row in df.iterrows():
+        pt = pd.to_datetime(row[pred_time_col]).strftime('%Y-%m-%d %H:%M:%S')
+        temp = float(row.get('temperatura_predicha', row.get('temperatura_pred', row.get('temperatura_predicted', None))))
+        # Humedad/presion pueden no existir en CSV de ejemplo. Ajustar si tu modelo predice más features.
+        humedad = float(row.get('humedad_pred', row.get('humedad_predicha', None))) if 'humedad_pred' in row.index or 'humedad_predicha' in row.index else None
+        presion = float(row.get('presion_pred', None)) if 'presion_pred' in row.index else None
+        insert_prediction(pt, temp, humedad, presion, confidence=None, model_version='v1.0')
+
+    return True
+
+# --- Obtener los últimos datos del sensor ---
+def get_latest_sensor_data(limit=10):
     """
-    Obtiene las últimas N predicciones.
-    
-    Args:
-        limit (int): Número de predicciones a obtener
-        
-    Returns:
-        list: Lista de diccionarios con las predicciones
+    Devuelve las últimas lecturas desde la tabla sensor_data.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    
     cursor.execute('''
-        SELECT * FROM predictions 
-        ORDER BY timestamp DESC 
+        SELECT timestamp, temperatura, humedad, presion
+        FROM sensor_data
+        ORDER BY timestamp DESC
         LIMIT ?
     ''', (limit,))
-    
     rows = cursor.fetchall()
     conn.close()
-    
-    result = []
-    for row in rows:
-        result.append({
-            'id': row['id'],
-            'timestamp': row['timestamp'],
-            'prediction_time': row['prediction_time'],
-            'temperatura_pred': row['temperatura_pred'],
-            'humedad_pred': row['humedad_pred'],
-            'presion_pred': row['presion_pred'],
-            'confidence': row['confidence'],
-            'model_version': row['model_version']
-        })
-    
-    return result
+
+    # Convertir a lista de diccionarios
+    return [
+        {
+            "timestamp": row["timestamp"],
+            "temperatura": row["temperatura"],
+            "humedad": row["humedad"],
+            "presion": row["presion"]
+        }
+        for row in rows
+    ]
 
 
+# --- Obtener las predicciones futuras ---
 def get_future_predictions():
     """
-    Obtiene las predicciones para tiempos futuros.
-    
-    Returns:
-        list: Lista de predicciones futuras
+    Devuelve todas las predicciones almacenadas en la tabla predictions.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    
-    now = datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S')
-    
     cursor.execute('''
-        SELECT * FROM predictions 
-        WHERE prediction_time > ?
+        SELECT prediction_time, temperatura_pred, humedad_pred, presion_pred, confidence, model_version
+        FROM predictions
         ORDER BY prediction_time ASC
-    ''', (now,))
-    
+    ''')
     rows = cursor.fetchall()
     conn.close()
-    
-    result = []
-    for row in rows:
-        result.append({
-            'id': row['id'],
-            'timestamp': row['timestamp'],
-            'prediction_time': row['prediction_time'],
-            'temperatura_pred': row['temperatura_pred'],
-            'humedad_pred': row['humedad_pred'],
-            'presion_pred': row['presion_pred'],
-            'confidence': row['confidence'],
-            'model_version': row['model_version']
-        })
-    
-    return result
 
-# ==================== SCRIPT PRINCIPAL ====================
-
-if __name__ == '__main__':
-    """
-    Script para inicializar la base de datos y hacer pruebas.
-    Ejecutar: python database.py
-    """
-    print("Inicializando base de datos...")
-    init_database()
-    
-    # Insertar datos de prueba
-    print("\nInsertando datos de prueba...")
-    
-    # Datos de sensores
-    sensor_id_1 = insert_sensor_data(22.5, 65.3, 1013.2, 'arduino_1')
-    sensor_id_2 = insert_sensor_data(21.8, 68.1, 1012.8, 'arduino_2')
-    print(f"Insertados {sensor_id_1} y {sensor_id_2} registros de sensores")
-    
-    # Predicciones
-    future_time = datetime.now(TIMEZONE) + timedelta(hours=1)
-    pred_id = insert_prediction(
-        future_time.strftime('%Y-%m-%d %H:%M:%S'),
-        23.1, 63.5, 1013.5, 0.89, 'v1.0'
-    )
-    print(f"Insertada predicción con ID: {pred_id}")
-    
-    # Mostrar últimos datos
-    print("\nÚltimos datos de sensores:")
-    latest = get_latest_sensor_data(5)
-    for data in latest:
-        print(f"   [{data['timestamp']}] {data['sensor_id']}: {data['temperatura']}°C, {data['humedad']}%")
-    
-    # Mostrar estadísticas
-    print("\nEstadísticas:")
-    stats = get_sensor_stats()
-    print(f"   Temperatura promedio: {stats['temperatura']['promedio']}°C")
-    print(f"   Humedad promedio: {stats['humedad']['promedio']}%")
-    print(f"   Total de registros: {stats['total_registros']}")
-    
-    print("\nBase de datos lista para usar")
+    return [
+        {
+            "prediction_time": row["prediction_time"],
+            "temperatura_pred": row["temperatura_pred"],
+            "humedad_pred": row["humedad_pred"],
+            "presion_pred": row["presion_pred"],
+            "confidence": row["confidence"],
+            "model_version": row["model_version"]
+        }
+        for row in rows
+    ]
