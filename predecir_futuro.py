@@ -12,51 +12,22 @@ def run_prediction(horas_futuro=6):
     base_dir = Path(__file__).resolve().parent
     
     # Usar Path para compatibilidad multiplataforma (Windows/Linux/Mac)
-    # Intentar usar modelo TFLite primero (para Raspberry Pi), si no existe usar .h5
-    model_tflite_path = base_dir / "modelos" / "modelo stefano" / "modelo_lstm_3_features.tflite"
-    model_h5_path = base_dir / "modelos" / "modelo stefano" / "modelo_lstm_3_features (1).h5"
+    model_path = base_dir / "modelos" / "modelo stefano" / "modelo_lstm_3_features (1).h5"
     scaler_path = base_dir / "modelos" / "modelo stefano" / "scaler_4_features.pkl"
     csv_path = base_dir / "Codigos_arduinos" / "data" / "sensor_data.csv"
 
     # comprobaciones
+    if not model_path.exists():
+        raise FileNotFoundError(f"Modelo no encontrado: {model_path}")
     if not scaler_path.exists():
         raise FileNotFoundError(f"Scaler no encontrado: {scaler_path}")
     if not csv_path.exists():
         raise FileNotFoundError(f"CSV no encontrado: {csv_path}")
 
-    # Decidir qué modelo usar
-    use_tflite = model_tflite_path.exists()
-    
-    if use_tflite:
-        print(f"🚀 Usando TensorFlow Lite (optimizado para Raspberry Pi)")
-        try:
-            import tflite_runtime.interpreter as tflite
-        except ImportError:
-            # Fallback a TensorFlow completo si tflite_runtime no está disponible
-            import tensorflow as tf
-            tflite = tf.lite
-        
-        interpreter = tflite.Interpreter(model_path=str(model_tflite_path))
-        interpreter.allocate_tensors()
-        
-        input_details = interpreter.get_input_details()
-        output_details = interpreter.get_output_details()
-        
-        def predict_tflite(X_input):
-            interpreter.set_tensor(input_details[0]['index'], X_input.astype(np.float32))
-            interpreter.invoke()
-            return interpreter.get_tensor(output_details[0]['index'])
-        
-        model_predict = predict_tflite
-    else:
-        print(f"🚀 Usando TensorFlow/Keras (.h5)")
-        if not model_h5_path.exists():
-            raise FileNotFoundError(f"Modelo no encontrado: {model_h5_path}")
-        
-        import tensorflow as tf
-        from tensorflow import keras
-        model = keras.models.load_model(model_h5_path, compile=False)
-        model_predict = lambda X: model.predict(X, verbose=0)
+    print(f"🚀 Cargando modelo Keras (.h5)")
+    import tensorflow as tf
+    from tensorflow import keras
+    model = keras.models.load_model(model_path, compile=False)
     import joblib
     scaler = joblib.load(scaler_path)
 
@@ -99,7 +70,7 @@ def run_prediction(horas_futuro=6):
     predicciones_temp = []
     for i in range(n_predicciones):
         X_input = ventana_actual.reshape(1, n_pasos, n_features)
-        pred_scaled = model_predict(X_input)[0][0]
+        pred_scaled = model.predict(X_input, verbose=0)[0][0]
         
         # Calcular timestamp futuro
         timestamp_futuro = ultimo_timestamp + timedelta(minutes=i+1)

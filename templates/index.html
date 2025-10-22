@@ -160,12 +160,12 @@
       const result = await resp.json();
       console.log(result.message);
       
-      statusDiv.innerText = '⏳ Procesando datos... Esto puede tardar 20-30 segundos';
+      statusDiv.innerText = '⏳ Procesando datos... Esto puede tardar varios minutos en Raspberry Pi';
       
-      // Polling inteligente: revisar cada 3 segundos hasta 15 intentos (45 segundos total)
+      // Polling inteligente: revisar cada 5 segundos hasta 60 intentos (5 minutos total)
       let attempts = 0;
-      const maxAttempts = 15;
-      const checkInterval = 3000; // 3 segundos
+      const maxAttempts = 60; // 60 intentos
+      const checkInterval = 5000; // 5 segundos
       let lastCheckTime = null;
       
       const checkPredictions = async () => {
@@ -191,24 +191,31 @@
             // ¡Éxito! Se generaron predicciones
             await fetchFuturePredictions(horas);
             statusDiv.style.color = '#4CAF50';
-            statusDiv.innerText = `✓ Predicciones generadas correctamente (${attempts * 3}s)`;
+            statusDiv.innerText = `✓ Predicciones generadas correctamente (${attempts * 5}s)`;
             btnPredecir.disabled = false;
             
             setTimeout(() => {
               statusDiv.innerText = '';
             }, 5000);
           } else if (attempts >= maxAttempts) {
-            // Timeout después de 45 segundos
+            // Timeout después de 5 minutos
             statusDiv.style.color = '#f44336';
-            statusDiv.innerText = '✗ Tiempo de espera agotado. Revisa los logs del servidor o recarga la página en unos segundos.';
+            statusDiv.innerText = '✗ Tiempo de espera agotado (5 minutos). Revisa los logs del servidor o intenta con menos horas.';
             btnPredecir.disabled = false;
             
             setTimeout(() => {
               statusDiv.innerText = '';
             }, 7000);
           } else {
-            // Seguir esperando
-            statusDiv.innerText = `⏳ Procesando datos... (${attempts * 3}s / ${maxAttempts * 3}s)`;
+            // Seguir esperando - mostrar tiempo en formato legible
+            const secondsElapsed = attempts * 5;
+            const minutesElapsed = Math.floor(secondsElapsed / 60);
+            const secondsRemaining = secondsElapsed % 60;
+            const timeDisplay = minutesElapsed > 0 
+              ? `${minutesElapsed}m ${secondsRemaining}s` 
+              : `${secondsElapsed}s`;
+            
+            statusDiv.innerText = `⏳ Procesando datos... (${timeDisplay} / 5min)`;
             setTimeout(checkPredictions, checkInterval);
           }
         } catch (error) {
@@ -223,8 +230,8 @@
         }
       };
       
-      // Iniciar el primer chequeo después de 5 segundos (dar tiempo inicial)
-      setTimeout(checkPredictions, 5000);
+      // Iniciar el primer chequeo después de 10 segundos (dar tiempo inicial para Raspberry Pi)
+      setTimeout(checkPredictions, 10000);
       
     } catch (e) {
       console.error('Error runPrediction', e);

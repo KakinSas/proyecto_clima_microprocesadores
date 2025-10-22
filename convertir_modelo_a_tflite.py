@@ -21,21 +21,41 @@ model.summary()
 
 # Convertir a TensorFlow Lite
 print(f"\n🔧 Convirtiendo a TensorFlow Lite...")
-converter = tf.lite.TFLiteConverter.from_keras_model(model)
 
-# Configuración para modelos LSTM (permite operaciones TF select)
-converter.target_spec.supported_ops = [
-    tf.lite.OpsSet.TFLITE_BUILTINS,  # Operaciones básicas de TFLite
-    tf.lite.OpsSet.SELECT_TF_OPS      # Operaciones TensorFlow necesarias para LSTM
-]
-converter._experimental_lower_tensor_list_ops = False
-
-# Optimizaciones para Raspberry Pi
-converter.optimizations = [tf.lite.Optimize.DEFAULT]
-
-# Convertir
-print(f"⚙️  Nota: Usando SELECT_TF_OPS para compatibilidad con LSTM")
-tflite_model = converter.convert()
+# Método 1: Intentar conversión con UnidirectionalSequenceLSTM (TFLite nativo)
+try:
+    print("🔄 Intento 1: Conversión a TFLite puro (sin Flex ops)...")
+    converter = tf.lite.TFLiteConverter.from_keras_model(model)
+    
+    # Solo operaciones nativas de TFLite
+    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+    converter._experimental_lower_tensor_list_ops = True
+    
+    # Cuantización para reducir tamaño
+    converter.optimizations = [tf.lite.Optimize.DEFAULT]
+    
+    tflite_model = converter.convert()
+    print("✅ Conversión exitosa con TFLite puro!")
+    
+except Exception as e:
+    print(f"❌ Falló conversión pura: {str(e)[:100]}")
+    print("\n🔄 Intento 2: Conversión con SELECT_TF_OPS (requiere TensorFlow completo)...")
+    
+    converter = tf.lite.TFLiteConverter.from_keras_model(model)
+    
+    # Configuración para modelos LSTM (permite operaciones TF select)
+    converter.target_spec.supported_ops = [
+        tf.lite.OpsSet.TFLITE_BUILTINS,  # Operaciones básicas de TFLite
+        tf.lite.OpsSet.SELECT_TF_OPS      # Operaciones TensorFlow necesarias para LSTM
+    ]
+    converter._experimental_lower_tensor_list_ops = False
+    
+    # Optimizaciones para Raspberry Pi
+    converter.optimizations = [tf.lite.Optimize.DEFAULT]
+    
+    # Convertir
+    print(f"⚠️  ADVERTENCIA: Este modelo requiere TensorFlow completo en Raspberry Pi")
+    tflite_model = converter.convert()
 
 # Guardar
 print(f"💾 Guardando modelo TFLite en: {modelo_tflite}")
