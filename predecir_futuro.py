@@ -10,8 +10,8 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 
 def run_prediction(horas_futuro=6):
     base_dir = Path(__file__).resolve().parent
-    model_path = base_dir / "modelos\modelo stefano\modelo_lstm_3_features.h5"
-    scaler_path = base_dir / "modelos\modelo stefano\scaler_3_features.pkl"
+    model_path = base_dir / "modelos\modelo stefano\modelo_lstm_3_features (1).h5"
+    scaler_path = base_dir / "modelos\modelo stefano\scaler_4_features.pkl"
     csv_path = base_dir / "Codigos_arduinos\data\sensor_data.csv"
 
     # comprobaciones (omito prints para brevedad)
@@ -29,13 +29,29 @@ def run_prediction(horas_futuro=6):
     scaler = joblib.load(scaler_path)
 
     df = pd.read_csv(csv_path)
+    
+    # Verificar columnas requeridas
     feature_mapping = {'temperatura': 'ts', 'humedad': 'hr', 'presion': 'p0'}
     missing = [col for col in feature_mapping.keys() if col not in df.columns]
     if missing:
         raise ValueError(f"Columnas faltantes en CSV: {missing}")
-
-    X_raw = df[list(feature_mapping.keys())].astype(float).to_numpy()
+    
+    # Verificar que exista timestamp
+    if 'timestamp' not in df.columns:
+        raise ValueError("CSV debe contener columna 'timestamp'")
+    
+    # Convertir timestamp a datetime
+    df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+    
+    # Extraer hora_decimal del timestamp (igual que en el entrenamiento)
+    df['hora_decimal'] = df['timestamp'].dt.hour + df['timestamp'].dt.minute / 60.0
+    
+    # Preparar datos con las 4 features (temperatura, humedad, presión, hora_decimal)
+    feature_cols = list(feature_mapping.keys()) + ['hora_decimal']
+    X_raw = df[feature_cols].astype(float).to_numpy()
+    
     n_pasos = 24
+    n_features = 4  # ts, hr, p0, hora_decimal
     # ahora por minuto
     n_predicciones = horas_futuro * 60
 
@@ -44,33 +60,43 @@ def run_prediction(horas_futuro=6):
 
     X_scaled = scaler.transform(X_raw)
     ventana_actual = X_scaled[-n_pasos:].copy()
+    
+    # Obtener último timestamp para calcular timestamps futuros
+    ultimo_timestamp = df['timestamp'].iloc[-1]
 
     predicciones_temp = []
     for i in range(n_predicciones):
-        X_input = ventana_actual.reshape(1, n_pasos, 3)
+        X_input = ventana_actual.reshape(1, n_pasos, n_features)
         pred_scaled = model.predict(X_input, verbose=0)[0][0]
+        
+        # Calcular timestamp futuro
+        timestamp_futuro = ultimo_timestamp + timedelta(minutes=i+1)
+        hora_decimal_futuro = timestamp_futuro.hour + timestamp_futuro.minute / 60.0
+        
+        # Mantener últimos valores de humedad y presión (escalados)
         ultima_hr_scaled = ventana_actual[-1, 1]
         ultima_p0_scaled = ventana_actual[-1, 2]
-        nuevo_registro_scaled = np.array([pred_scaled, ultima_hr_scaled, ultima_p0_scaled])
+        
+        # Crear nuevo registro con las 4 features
+        nuevo_registro_scaled = np.array([
+            pred_scaled,           # temperatura predicha (escalada)
+            ultima_hr_scaled,      # humedad (escalada)
+            ultima_p0_scaled,      # presión (escalada)
+            hora_decimal_futuro    # hora_decimal (no escalada, ya está en [0, 24))
+        ])
+        
         ventana_actual = np.vstack([ventana_actual[1:], nuevo_registro_scaled])
         predicciones_temp.append(pred_scaled)
 
     predicciones_array = np.array(predicciones_temp).reshape(-1, 1)
-    dummy = np.zeros((len(predicciones_array), 3))
+    dummy = np.zeros((len(predicciones_array), n_features))
     dummy[:, 0] = predicciones_array.flatten()
-    dummy[:, 1] = X_scaled[-1, 1]
-    dummy[:, 2] = X_scaled[-1, 2]
+    dummy[:, 1] = X_scaled[-1, 1]  # última humedad
+    dummy[:, 2] = X_scaled[-1, 2]  # última presión
+    dummy[:, 3] = 0  # hora_decimal (no afecta al inverse_transform de temperatura)
     predicciones_reales = scaler.inverse_transform(dummy)[:, 0]
 
-    # timestamps por minuto a partir del último timestamp en CSV (si existe)
-    if 'timestamp' in df.columns:
-        try:
-            ultimo_timestamp = pd.to_datetime(df['timestamp'].iloc[-1])
-        except:
-            ultimo_timestamp = datetime.now()
-    else:
-        ultimo_timestamp = datetime.now()
-
+    # timestamps por minuto a partir del último timestamp en CSV
     timestamps_futuros = [ultimo_timestamp + timedelta(minutes=i+1) for i in range(n_predicciones)]
     resultado_df = pd.DataFrame({
         'timestamp': timestamps_futuros,

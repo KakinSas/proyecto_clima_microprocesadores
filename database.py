@@ -4,16 +4,44 @@ import os
 from datetime import datetime, timedelta
 import pytz
 import pandas as pd
+import time
 
 DB_FOLDER = 'data'
 DB_NAME = 'clima.db'
 DB_PATH = os.path.join(DB_FOLDER, DB_NAME)
 TIMEZONE = pytz.timezone('America/Santiago')
 
-def get_db_connection():
-    conn = sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
+def get_db_connection(timeout=30.0):
+    """
+    Crea conexión a la BD con timeout aumentado para evitar bloqueos.
+    timeout: tiempo máximo de espera en segundos (default 30s)
+    """
+    conn = sqlite3.connect(
+        DB_PATH, 
+        detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES,
+        timeout=timeout,
+        check_same_thread=False
+    )
     conn.row_factory = sqlite3.Row
+    # Habilitar WAL mode para mejor concurrencia
+    conn.execute('PRAGMA journal_mode=WAL')
     return conn
+
+def retry_on_lock(func, max_retries=3, delay=0.5):
+    """
+    Reintenta una función si encuentra database locked.
+    max_retries: número máximo de reintentos
+    delay: tiempo de espera entre reintentos en segundos
+    """
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e) and attempt < max_retries - 1:
+                time.sleep(delay * (attempt + 1))  # Backoff exponencial
+                continue
+            raise  # Re-lanzar si no es locked o se acabaron los reintentos
+    return None
 
 def init_database():
     if not os.path.exists(DB_FOLDER):
@@ -110,46 +138,63 @@ def load_csv_and_aggregate_to_db(csv_path=None):
     df['timestamp'] = df['timestamp'].dt.tz_localize(None)
 
     # Agrupar por minuto: redondear timestamp a minuto y promediar
-    df['timestamp_min'] = df['timestamp'].dt.floor('T')  # 'T' es minuto
+    df['timestamp_min'] = df['timestamp'].dt.floor('min')  # 'min' es minuto (reemplaza 'T' deprecated)
     agg = df.groupby('timestamp_min').agg({
         'temperatura': 'mean',
         'humedad': 'mean',
         'presion': 'mean'
     }).reset_index().rename(columns={'timestamp_min':'timestamp'})
 
-    # Insertar o reemplazar datos en la tabla sensor_data
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    # Sincronización incremental: solo insertar datos nuevos
+    def _sync():
+        conn = get_db_connection()
+        cursor = conn.cursor()
 
-    # Aquí elegimos vaciar la tabla y reinsertar (simplifica migraciones)
-    cursor.execute('DELETE FROM sensor_data')
-    conn.commit()
+        # Obtener el último timestamp en la base de datos
+        cursor.execute('SELECT MAX(timestamp) as max_ts FROM sensor_data')
+        result = cursor.fetchone()
+        last_timestamp = result['max_ts'] if result['max_ts'] else None
 
-    insert_q = 'INSERT INTO sensor_data (timestamp, temperatura, humedad, presion) VALUES (?, ?, ?, ?)'
-    records = [(row['timestamp'].strftime('%Y-%m-%d %H:%M:%S'), 
-                float(row['temperatura']) if not pd.isna(row['temperatura']) else None,
-                float(row['humedad']) if not pd.isna(row['humedad']) else None,
-                float(row['presion']) if not pd.isna(row['presion']) else None) 
-               for _, row in agg.iterrows()]
+        # Filtrar solo registros nuevos
+        agg_to_insert = agg.copy()
+        if last_timestamp:
+            last_timestamp_dt = pd.to_datetime(last_timestamp)
+            agg_to_insert = agg_to_insert[agg_to_insert['timestamp'] > last_timestamp_dt]
+        
+        if len(agg_to_insert) == 0:
+            conn.close()
+            return 0  # No hay datos nuevos
 
-    cursor.executemany(insert_q, records)
-    conn.commit()
-    conn.close()
-    return len(records)
+        insert_q = 'INSERT INTO sensor_data (timestamp, temperatura, humedad, presion) VALUES (?, ?, ?, ?)'
+        records = [(row['timestamp'].strftime('%Y-%m-%d %H:%M:%S'), 
+                    float(row['temperatura']) if not pd.isna(row['temperatura']) else None,
+                    float(row['humedad']) if not pd.isna(row['humedad']) else None,
+                    float(row['presion']) if not pd.isna(row['presion']) else None) 
+                   for _, row in agg_to_insert.iterrows()]
+
+        cursor.executemany(insert_q, records)
+        conn.commit()
+        conn.close()
+        return len(records)
+    
+    return retry_on_lock(_sync, max_retries=5, delay=0.5)
 
 # --- Insert predictions desde CSV generado por predecir_futuro ---
 def insert_prediction(prediction_time, temperatura_pred, humedad_pred, presion_pred=None, confidence=None, model_version='v1.0'):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO predictions 
-        (prediction_time, temperatura_pred, humedad_pred, presion_pred, confidence, model_version)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (prediction_time, temperatura_pred, humedad_pred, presion_pred, confidence, model_version))
-    record_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return record_id
+    def _insert():
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO predictions 
+            (prediction_time, temperatura_pred, humedad_pred, presion_pred, confidence, model_version)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (prediction_time, temperatura_pred, humedad_pred, presion_pred, confidence, model_version))
+        record_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return record_id
+    
+    return retry_on_lock(_insert, max_retries=5, delay=0.3)
 
 def insert_predictions_from_csv(csv_path):
     if not os.path.exists(csv_path):
@@ -205,17 +250,22 @@ def get_latest_sensor_data(limit=10):
 def get_future_predictions():
     """
     Devuelve todas las predicciones almacenadas en la tabla predictions.
+    Con reintentos automáticos si la BD está bloqueada.
     """
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT prediction_time, temperatura_pred, humedad_pred, presion_pred, confidence, model_version
-        FROM predictions
-        ORDER BY prediction_time ASC
-    ''')
-    rows = cursor.fetchall()
-    conn.close()
-
+    def _fetch():
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT prediction_time, temperatura_pred, humedad_pred, presion_pred, confidence, model_version
+            FROM predictions
+            ORDER BY prediction_time ASC
+        ''')
+        rows = cursor.fetchall()
+        conn.close()
+        return rows
+    
+    rows = retry_on_lock(_fetch, max_retries=5, delay=0.3)
+    
     return [
         {
             "prediction_time": row["prediction_time"],
@@ -227,3 +277,21 @@ def get_future_predictions():
         }
         for row in rows
     ]
+
+
+# --- Limpiar todas las predicciones ---
+def clear_predictions():
+    """
+    Elimina todas las predicciones de la tabla predictions.
+    Con reintentos automáticos si la BD está bloqueada.
+    """
+    def _delete():
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM predictions')
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        return deleted_count
+    
+    return retry_on_lock(_delete, max_retries=5, delay=0.3)
