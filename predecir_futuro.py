@@ -11,23 +11,63 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 def run_prediction(horas_futuro=6):
     base_dir = Path(__file__).resolve().parent
     
-    # Usar Path para compatibilidad multiplataforma (Windows/Linux/Mac)
-    model_path = base_dir / "modelos" / "modelo stefano" / "modelo_lstm_3_features (1).h5"
+    # Rutas de modelos
+    model_tflite_path = base_dir / "modelos" / "modelo stefano" / "modelo_lstm_3_features.tflite"
+    model_h5_path = base_dir / "modelos" / "modelo stefano" / "modelo_lstm_3_features (1).h5"
     scaler_path = base_dir / "modelos" / "modelo stefano" / "scaler_4_features.pkl"
     csv_path = base_dir / "Codigos_arduinos" / "data" / "sensor_data.csv"
 
-    # comprobaciones
-    if not model_path.exists():
-        raise FileNotFoundError(f"Modelo no encontrado: {model_path}")
+    # Comprobaciones
     if not scaler_path.exists():
         raise FileNotFoundError(f"Scaler no encontrado: {scaler_path}")
     if not csv_path.exists():
         raise FileNotFoundError(f"CSV no encontrado: {csv_path}")
 
-    print(f"🚀 Cargando modelo Keras (.h5)")
-    import tensorflow as tf
-    from tensorflow import keras
-    model = keras.models.load_model(model_path, compile=False)
+    # Intentar cargar modelo TFLite primero (aunque falle con Flex ops)
+    model_predict = None
+    
+    if model_tflite_path.exists():
+        try:
+            print(f"🔄 Intentando cargar modelo TFLite...")
+            
+            # Intentar con tflite_runtime primero
+            try:
+                import tflite_runtime.interpreter as tflite
+                print(f"✅ Usando tflite_runtime")
+            except ImportError:
+                print(f"⚠️  tflite_runtime no disponible, usando tensorflow.lite")
+                import tensorflow as tf
+                tflite = tf.lite
+            
+            interpreter = tflite.Interpreter(model_path=str(model_tflite_path))
+            interpreter.allocate_tensors()
+            
+            input_details = interpreter.get_input_details()
+            output_details = interpreter.get_output_details()
+            
+            def predict_tflite(X_input):
+                interpreter.set_tensor(input_details[0]['index'], X_input.astype(np.float32))
+                interpreter.invoke()
+                return interpreter.get_tensor(output_details[0]['index'])
+            
+            model_predict = predict_tflite
+            print(f"✅ Modelo TFLite cargado exitosamente")
+            
+        except Exception as e:
+            print(f"❌ Error al cargar TFLite: {type(e).__name__}: {str(e)[:100]}")
+            print(f"🔄 Fallback: Intentando cargar modelo .h5 con TensorFlow...")
+    
+    # Si TFLite falló o no existe, usar .h5
+    if model_predict is None:
+        if not model_h5_path.exists():
+            raise FileNotFoundError(f"Modelo .h5 no encontrado: {model_h5_path}")
+        
+        print(f"🚀 Cargando modelo Keras (.h5) con TensorFlow completo")
+        import tensorflow as tf
+        from tensorflow import keras
+        model = keras.models.load_model(model_h5_path, compile=False)
+        model_predict = lambda X: model.predict(X, verbose=0)
+        print(f"✅ Modelo Keras cargado exitosamente")
     import joblib
     scaler = joblib.load(scaler_path)
 
@@ -70,7 +110,7 @@ def run_prediction(horas_futuro=6):
     predicciones_temp = []
     for i in range(n_predicciones):
         X_input = ventana_actual.reshape(1, n_pasos, n_features)
-        pred_scaled = model.predict(X_input, verbose=0)[0][0]
+        pred_scaled = model_predict(X_input)[0][0]
         
         # Calcular timestamp futuro
         timestamp_futuro = ultimo_timestamp + timedelta(minutes=i+1)

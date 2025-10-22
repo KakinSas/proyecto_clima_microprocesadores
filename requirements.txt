@@ -6,8 +6,10 @@ bleak==0.22.2
 pandas>=2.0.0
 # TensorFlow para PC (versión completa)
 tensorflow>=2.15.0; platform_machine != "armv7l" and platform_machine != "aarch64"
-# TensorFlow para Raspberry Pi (versión compatible con ARM 32-bit)
-# Nota: En Raspberry Pi Zero 2 W puede tardar 10-20 minutos en instalar
+# TensorFlow Lite Runtime para Raspberry Pi (intentará usar .tflite, fallará con Flex ops)
+# Fallback: Instalará TensorFlow completo si tflite-runtime falla
+tflite-runtime; platform_machine == "armv7l" or platform_machine == "aarch64"
+# TensorFlow completo como fallback para Raspberry Pi
 tensorflow==2.8.0; platform_machine == "armv7l" or platform_machine == "aarch64"
 scikit-learn
 joblib
