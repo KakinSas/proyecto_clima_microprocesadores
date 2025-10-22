@@ -48,6 +48,11 @@ modelos/*.pickle
 modelos/*.jobliG
 modelos/modelo stefano/*.h5
 modelos/modelo stefano/*.pkl
+modelos/modelo stefano/*.tflite
+
+# EXCEPCIONES: Permitir solo modelo TFLite y scaler (necesarios para Raspberry Pi)
+!modelos/modelo stefano/modelo_simple_tflite.tflite
+!modelos/modelo stefano/scaler_4_features_tflite.pkl
 
 # Datasets grandes
 modelos/modelo stefano/dataset_ml.csv
