@@ -10,9 +10,11 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 
 def run_prediction(horas_futuro=6):
     base_dir = Path(__file__).resolve().parent
-    model_path = base_dir / "modelos\modelo stefano\modelo_lstm_3_features (1).h5"
-    scaler_path = base_dir / "modelos\modelo stefano\scaler_4_features.pkl"
-    csv_path = base_dir / "Codigos_arduinos\data\sensor_data.csv"
+    
+    # Usar Path para compatibilidad multiplataforma (Windows/Linux/Mac)
+    model_path = base_dir / "modelos" / "modelo stefano" / "modelo_lstm_3_features (1).h5"
+    scaler_path = base_dir / "modelos" / "modelo stefano" / "scaler_4_features.pkl"
+    csv_path = base_dir / "Codigos_arduinos" / "data" / "sensor_data.csv"
 
     # comprobaciones (omito prints para brevedad)
     if not model_path.exists():

@@ -7,6 +7,7 @@ import sys
 import re
 import glob
 from datetime import datetime
+from pathlib import Path
 
 # Importa las funciones de database y predicción (ver abajo)
 import database
@@ -61,7 +62,9 @@ sync_thread = None
 sync_running = False
 
 # Configuración de sincronización (sin variables de entorno)
-CSV_PATH = 'Codigos_arduinos/data/sensor_data.csv'
+# Usar Path para compatibilidad multiplataforma
+BASE_DIR = Path(__file__).resolve().parent
+CSV_PATH = BASE_DIR / 'Codigos_arduinos' / 'data' / 'sensor_data.csv'
 SYNC_INTERVAL = 60  # Sincronizar cada 60 segundos
 
 def sync_csv_to_database():
@@ -74,15 +77,15 @@ def sync_csv_to_database():
     
     while sync_running:
         try:
-            if os.path.exists(CSV_PATH):
+            if CSV_PATH.exists():
                 logger.info(f"📥 Sincronizando {CSV_PATH} a la base de datos...")
-                rows_added = database.load_csv_and_aggregate_to_db(csv_path=CSV_PATH)
+                rows_added = database.load_csv_and_aggregate_to_db(csv_path=str(CSV_PATH))
                 if rows_added > 0:
                     logger.info(f"✅ Sincronización completada: {rows_added} registros nuevos agregados")
                 else:
                     logger.debug(f"ℹ️  Sin datos nuevos para sincronizar")
             else:
-                logger.warning(f"⚠️  Archivo {CSV_PATH} no encontrado en ruta absoluta: {os.path.abspath(CSV_PATH)}")
+                logger.warning(f"⚠️  Archivo {CSV_PATH} no encontrado en ruta absoluta: {CSV_PATH.absolute()}")
         except FileNotFoundError as e:
             logger.error(f"❌ Error: Archivo no encontrado - {e}")
         except ValueError as e:
@@ -291,9 +294,9 @@ def api_sync_status():
         logger.debug("🔍 Consultando estado de sincronización")
         status = {
             "running": sync_running,
-            "csv_path": CSV_PATH,
-            "csv_path_absolute": os.path.abspath(CSV_PATH),
-            "csv_exists": os.path.exists(CSV_PATH),
+            "csv_path": str(CSV_PATH),
+            "csv_path_absolute": str(CSV_PATH.absolute()),
+            "csv_exists": CSV_PATH.exists(),
             "interval_seconds": SYNC_INTERVAL
         }
         return jsonify(status), 200
@@ -337,8 +340,8 @@ def api_force_sync():
     """
     try:
         logger.info(f"⚡ Sincronización forzada solicitada para {CSV_PATH}")
-        if os.path.exists(CSV_PATH):
-            rows_added = database.load_csv_and_aggregate_to_db(csv_path=CSV_PATH)
+        if CSV_PATH.exists():
+            rows_added = database.load_csv_and_aggregate_to_db(csv_path=str(CSV_PATH))
             logger.info(f"✅ Sincronización forzada completada: {rows_added} registros agregados")
             return jsonify({
                 "status": "ok", 
@@ -346,11 +349,11 @@ def api_force_sync():
                 "rows_added": rows_added
             }), 200
         else:
-            logger.warning(f"⚠️  CSV no encontrado en: {os.path.abspath(CSV_PATH)}")
+            logger.warning(f"⚠️  CSV no encontrado en: {CSV_PATH.absolute()}")
             return jsonify({
                 "status": "error", 
                 "message": f"CSV no encontrado en {CSV_PATH}",
-                "absolute_path": os.path.abspath(CSV_PATH)
+                "absolute_path": str(CSV_PATH.absolute())
             }), 404
     except FileNotFoundError as e:
         logger.error(f"❌ Error: Archivo no encontrado - {e}")
@@ -399,7 +402,7 @@ if __name__ == '__main__':
         logger.info("="*60)
         logger.info("🚀 Iniciando aplicación Flask - Sistema de Clima")
         logger.info(f"📁 Directorio de trabajo: {os.getcwd()}")
-        logger.info(f"📄 CSV Path: {os.path.abspath(CSV_PATH)}")
+        logger.info(f"📄 CSV Path: {CSV_PATH.absolute()}")
         logger.info(f"⏱️  Intervalo de sincronización: {SYNC_INTERVAL} segundos")
         logger.info("="*60)
         app.run(debug=True, host='0.0.0.0', port=5000)
