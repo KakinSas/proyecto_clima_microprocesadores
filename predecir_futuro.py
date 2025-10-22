@@ -5,8 +5,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
+import logging
 
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+
+# Configurar logger
+logger = logging.getLogger(__name__)
 
 def run_prediction(horas_futuro=6):
     base_dir = Path(__file__).resolve().parent
@@ -39,26 +43,30 @@ def run_prediction(horas_futuro=6):
     # === INTENTO 1: Modelo Simple TFLite (sin TensorFlow) ===
     if model_tflite_simple_path.exists() and scaler_tflite_path.exists():
         try:
-            print(f"🔄 Intentando modelo TFLite simple: {model_tflite_simple_path.name}")
+            logger.info(f"🔄 Intentando modelo TFLite simple: {model_tflite_simple_path.name}")
             
             # Cargar scaler
             scaler = joblib.load(scaler_tflite_path)
+            logger.info(f"✅ Scaler cargado: {scaler_tflite_path.name}")
             
             # Intentar cargar con tflite_runtime (sin TensorFlow)
             try:
                 import tflite_runtime.interpreter as tflite
-                print(f"✅ Usando tflite_runtime (sin TensorFlow)")
+                logger.info(f"✅ Usando tflite_runtime (sin TensorFlow)")
             except ImportError:
                 # Fallback a tensorflow.lite
                 import tensorflow as tf
                 tflite = tf.lite
-                print(f"⚠️  tflite_runtime no disponible, usando tensorflow.lite")
+                logger.info(f"⚠️  tflite_runtime no disponible, usando tensorflow.lite")
             
+            logger.info(f"📂 Cargando modelo desde: {model_tflite_simple_path}")
             interpreter = tflite.Interpreter(model_path=str(model_tflite_simple_path))
             interpreter.allocate_tensors()
             
             input_details = interpreter.get_input_details()
             output_details = interpreter.get_output_details()
+            logger.info(f"📊 Input shape: {input_details[0]['shape']}, dtype: {input_details[0]['dtype']}")
+            logger.info(f"📊 Output shape: {output_details[0]['shape']}, dtype: {output_details[0]['dtype']}")
             
             def predict_tflite(X_input):
                 interpreter.set_tensor(input_details[0]['index'], X_input.astype(np.float32))
@@ -67,17 +75,18 @@ def run_prediction(horas_futuro=6):
             
             model_predict = predict_tflite
             usar_flatten = True  # Modelo Dense necesita entrada aplanada
-            print(f"✅ Modelo TFLite simple cargado exitosamente")
+            logger.info(f"✅ Modelo TFLite simple cargado exitosamente")
             
         except Exception as e:
-            print(f"❌ Error cargando TFLite simple: {type(e).__name__}: {str(e)[:100]}")
+            logger.error(f"❌ Error cargando TFLite simple: {type(e).__name__}: {str(e)}")
+            logger.exception("Traceback completo del error TFLite:")
             model_predict = None
     
     # === INTENTO 2: Modelo LSTM .h5 (requiere TensorFlow) ===
     if model_predict is None:
         if model_h5_lstm_path.exists() and scaler_lstm_path.exists():
             try:
-                print(f"🔄 Fallback: Cargando modelo LSTM .h5 con TensorFlow...")
+                logger.info(f"🔄 Fallback: Cargando modelo LSTM .h5 con TensorFlow...")
                 
                 import tensorflow as tf
                 from tensorflow import keras
@@ -87,9 +96,10 @@ def run_prediction(horas_futuro=6):
                 
                 model_predict = lambda X: model.predict(X, verbose=0)
                 usar_flatten = False  # LSTM usa secuencias 3D
-                print(f"✅ Modelo LSTM .h5 cargado exitosamente")
+                logger.info(f"✅ Modelo LSTM .h5 cargado exitosamente")
                 
             except ImportError:
+                logger.error("❌ TensorFlow no está instalado, no se puede cargar LSTM")
                 raise ImportError(
                     "❌ No se pudo cargar ningún modelo.\n"
                     "   • TFLite simple no está disponible o falló\n"
