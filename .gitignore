@@ -40,6 +40,22 @@ desktop.ini
 *.tmp
 *.temp
 
-# data
+# Modelos entrenados (archivos grandes)
+modelos/*.h5
+modelos/*.hdf5
+modelos/*.pkl
+modelos/*.pickle
+modelos/*.jobliG
+modelos/modelo stefano/*.h5
+modelos/modelo stefano/*.pkl
 
+# Datasets grandes
+modelos/modelo stefano/dataset_ml.csv
+
+# Predicciones y outputs generados (archivos temporales)
+modelos/predicciones_*.csv
+modelos/predicciones_*.png
+
+# Permitir archivos CSV de datos del sensor (pequeños)
+# !Codigos_arduinos/data/sensor_data.csv
 
