@@ -23,21 +23,30 @@ def run_prediction(horas_futuro=6):
     if not csv_path.exists():
         raise FileNotFoundError(f"CSV no encontrado: {csv_path}")
 
-    # Intentar cargar modelo TFLite primero (aunque falle con Flex ops)
+    # Intentar cargar modelo TFLite (con tflite_runtime si está disponible)
     model_predict = None
     
+    # Verificar que al menos uno de los modelos exista
+    if not model_tflite_path.exists() and not model_h5_path.exists():
+        raise FileNotFoundError(f"No se encontró ningún modelo (.tflite o .h5)")
+    
+    # SIEMPRE intentar TFLite primero
     if model_tflite_path.exists():
         try:
-            print(f"🔄 Intentando cargar modelo TFLite...")
+            print(f"🔄 Intentando cargar modelo TFLite desde {model_tflite_path.name}...")
             
-            # Intentar con tflite_runtime primero
+            # Intentar con tflite_runtime primero (sin TensorFlow)
             try:
                 import tflite_runtime.interpreter as tflite
-                print(f"✅ Usando tflite_runtime")
+                print(f"✅ Usando tflite_runtime (sin TensorFlow)")
             except ImportError:
-                print(f"⚠️  tflite_runtime no disponible, usando tensorflow.lite")
-                import tensorflow as tf
-                tflite = tf.lite
+                # Si no hay tflite_runtime, intentar con tensorflow.lite
+                try:
+                    import tensorflow as tf
+                    tflite = tf.lite
+                    print(f"⚠️  tflite_runtime no disponible, usando tensorflow.lite")
+                except ImportError:
+                    raise ImportError("No se encontró ni tflite_runtime ni tensorflow")
             
             interpreter = tflite.Interpreter(model_path=str(model_tflite_path))
             interpreter.allocate_tensors()
@@ -54,20 +63,24 @@ def run_prediction(horas_futuro=6):
             print(f"✅ Modelo TFLite cargado exitosamente")
             
         except Exception as e:
-            print(f"❌ Error al cargar TFLite: {type(e).__name__}: {str(e)[:100]}")
-            print(f"🔄 Fallback: Intentando cargar modelo .h5 con TensorFlow...")
+            print(f"❌ Error al cargar TFLite: {type(e).__name__}: {str(e)[:150]}")
+            # Si TFLite falla, intentar .h5 como último recurso
+            if model_h5_path.exists():
+                print(f"🔄 Fallback: Intentando cargar modelo .h5 con TensorFlow...")
+                try:
+                    import tensorflow as tf
+                    from tensorflow import keras
+                    model = keras.models.load_model(model_h5_path, compile=False)
+                    model_predict = lambda X: model.predict(X, verbose=0)
+                    print(f"✅ Modelo Keras (.h5) cargado exitosamente")
+                except ImportError:
+                    raise ImportError(f"❌ TFLite falló y TensorFlow no está instalado. Instala tflite-runtime o tensorflow.")
+            else:
+                raise FileNotFoundError(f"❌ TFLite falló y no se encontró modelo .h5 de respaldo")
     
-    # Si TFLite falló o no existe, usar .h5
+    # Si no se pudo cargar ningún modelo, error
     if model_predict is None:
-        if not model_h5_path.exists():
-            raise FileNotFoundError(f"Modelo .h5 no encontrado: {model_h5_path}")
-        
-        print(f"🚀 Cargando modelo Keras (.h5) con TensorFlow completo")
-        import tensorflow as tf
-        from tensorflow import keras
-        model = keras.models.load_model(model_h5_path, compile=False)
-        model_predict = lambda X: model.predict(X, verbose=0)
-        print(f"✅ Modelo Keras cargado exitosamente")
+        raise RuntimeError("No se pudo cargar ningún modelo (ni .tflite ni .h5)")
     import joblib
     scaler = joblib.load(scaler_path)
 
