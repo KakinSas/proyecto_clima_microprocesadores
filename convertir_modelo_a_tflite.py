@@ -1,6 +1,6 @@
 """
 Script para convertir modelo Keras (.h5) a TensorFlow Lite (.tflite)
-Para optimizar el rendimiento en Raspberry Pi Zero 2 W
+Con máxima compatibilidad para tflite-runtime antiguo en Raspberry Pi
 """
 
 import tensorflow as tf
@@ -9,92 +9,63 @@ from pathlib import Path
 
 # Rutas
 base_dir = Path(__file__).resolve().parent
-modelo_h5 = base_dir / "modelos" / "modelo stefano" / "modelo_lstm_3_features (1).h5"
-modelo_tflite = base_dir / "modelos" / "modelo stefano" / "modelo_lstm_3_features.tflite"
+modelo_h5 = base_dir / "modelos" / "modelo stefano" / "modelo_simple_tflite.h5"
+modelo_tflite = base_dir / "modelos" / "modelo stefano" / "modelo_simple_tflite.tflite"
 
+print(f"TensorFlow version: {tf.__version__}")
 print(f"🔄 Cargando modelo desde: {modelo_h5}")
 
-# Cargar el modelo Keras sin compilar (ignora métricas y optimizadores incompatibles)
+# Cargar el modelo Keras
 model = tf.keras.models.load_model(modelo_h5, compile=False)
 
-print(f"📊 Arquitectura del modelo:")
-model.summary()
+print(f"✅ Modelo cargado")
+print(f"   Input shape: {model.input_shape}")
+print(f"   Output shape: {model.output_shape}")
 
-# Convertir a TensorFlow Lite
-print(f"\n🔧 Convirtiendo a TensorFlow Lite...")
+# Convertir a TensorFlow Lite con compatibilidad máxima
+print(f"\n🔧 Convirtiendo a TFLite (modo compatibilidad)...")
 
-# Método 1: Intentar cuantización completa (más compatible con tflite-runtime)
-try:
-    print("🔄 Intento 1: Conversión con cuantización INT8 (máxima compatibilidad)...")
-    
-    # Necesitamos un dataset representativo para cuantización
-    import pandas as pd
-    csv_path = base_dir / "Codigos_arduinos" / "data" / "sensor_data.csv"
-    
-    if csv_path.exists():
-        df = pd.read_csv(csv_path)
-        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
-        df['hora_decimal'] = df['timestamp'].dt.hour + df['timestamp'].dt.minute / 60.0
-        
-        feature_mapping = {'temperatura': 'ts', 'humedad': 'hr', 'presion': 'p0'}
-        feature_cols = list(feature_mapping.keys()) + ['hora_decimal']
-        X_raw = df[feature_cols].astype(float).to_numpy()
-        
-        # Tomar muestras para calibración
-        import joblib
-        scaler_path = base_dir / "modelos" / "modelo stefano" / "scaler_4_features.pkl"
-        scaler = joblib.load(scaler_path)
-        X_scaled = scaler.transform(X_raw)
-        
-        # Dataset representativo (últimas 100 ventanas)
-        def representative_dataset():
-            for i in range(min(100, len(X_scaled) - 24)):
-                yield [X_scaled[i:i+24].astype(np.float32).reshape(1, 24, 4)]
-        
-        converter = tf.lite.TFLiteConverter.from_keras_model(model)
-        converter.optimizations = [tf.lite.Optimize.DEFAULT]
-        converter.representative_dataset = representative_dataset
-        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-        converter.inference_input_type = tf.int8
-        converter.inference_output_type = tf.int8
-        
-        tflite_model = converter.convert()
-        print("✅ Conversión exitosa con INT8! (Compatible con tflite-runtime)")
-        
-    else:
-        raise FileNotFoundError("CSV no encontrado para cuantización")
-    
-except Exception as e:
-    print(f"❌ Falló conversión INT8: {str(e)[:150]}")
-    print("\n🔄 Intento 2: Conversión con SELECT_TF_OPS (requiere TensorFlow completo)...")
-    
-    converter = tf.lite.TFLiteConverter.from_keras_model(model)
-    
-    # Configuración para modelos LSTM (permite operaciones TF select)
-    converter.target_spec.supported_ops = [
-        tf.lite.OpsSet.TFLITE_BUILTINS,  # Operaciones básicas de TFLite
-        tf.lite.OpsSet.SELECT_TF_OPS      # Operaciones TensorFlow necesarias para LSTM
-    ]
-    converter._experimental_lower_tensor_list_ops = False
-    
-    # Optimizaciones para Raspberry Pi
-    converter.optimizations = [tf.lite.Optimize.DEFAULT]
-    
-    # Convertir
-    print(f"⚠️  ADVERTENCIA: Este modelo requiere TensorFlow completo en Raspberry Pi")
-    tflite_model = converter.convert()
+converter = tf.lite.TFLiteConverter.from_keras_model(model)
+
+# CONFIGURACIÓN PARA MÁXIMA COMPATIBILIDAD CON TFLITE-RUNTIME ANTIGUO
+converter.target_spec.supported_ops = [
+    tf.lite.OpsSet.TFLITE_BUILTINS  # Solo operadores builtin básicos
+]
+# Forzar uso de operadores antiguos (opcode version 11 o menor)
+converter._experimental_new_quantizer = False
+
+print(f"   • Solo operadores TFLITE_BUILTINS")
+print(f"   • Forzando opcode versions antiguas")
+
+# Convertir
+tflite_model = converter.convert()
 
 # Guardar
-print(f"💾 Guardando modelo TFLite en: {modelo_tflite}")
+print(f"\n💾 Guardando modelo: {modelo_tflite}")
 with open(modelo_tflite, 'wb') as f:
     f.write(tflite_model)
 
-# Verificar tamaño
-import os
-size_h5 = os.path.getsize(modelo_h5) / (1024 * 1024)  # MB
-size_tflite = os.path.getsize(modelo_tflite) / (1024 * 1024)  # MB
+print(f"✅ Conversión exitosa!")
+print(f"   • Tamaño: {len(tflite_model):,} bytes ({len(tflite_model)/1024:.1f} KB)")
 
-print(f"\n✅ Conversión completada!")
-print(f"📦 Tamaño modelo .h5: {size_h5:.2f} MB")
-print(f"📦 Tamaño modelo .tflite: {size_tflite:.2f} MB")
-print(f"🎯 Reducción: {((size_h5 - size_tflite) / size_h5 * 100):.1f}%")
+# Verificar
+print(f"\n🧪 Verificando modelo...")
+interpreter = tf.lite.Interpreter(model_path=str(modelo_tflite))
+interpreter.allocate_tensors()
+
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+print(f"   • Input shape: {input_details[0]['shape']}")
+print(f"   • Input dtype: {input_details[0]['dtype']}")
+print(f"   • Output shape: {output_details[0]['shape']}")
+
+# Test
+test_input = np.random.randn(1, 96).astype(np.float32)
+interpreter.set_tensor(input_details[0]['index'], test_input)
+interpreter.invoke()
+test_output = interpreter.get_tensor(output_details[0]['index'])
+
+
+print(f"   • Test output: {test_output[0][0]:.4f}")
+print(f"\n🚀 Listo! Ahora commitea y pushea a Raspberry Pi")
