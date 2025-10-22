@@ -11,44 +11,50 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 def run_prediction(horas_futuro=6):
     base_dir = Path(__file__).resolve().parent
     
-    # Rutas de modelos
-    model_tflite_path = base_dir / "modelos" / "modelo stefano" / "modelo_lstm_3_features.tflite"
-    model_h5_path = base_dir / "modelos" / "modelo stefano" / "modelo_lstm_3_features (1).h5"
-    scaler_path = base_dir / "modelos" / "modelo stefano" / "scaler_4_features.pkl"
+    # Rutas de modelos (prioridad: TFLite compatible > LSTM .h5)
+    model_tflite_simple_path = base_dir / "modelos" / "modelo stefano" / "modelo_simple_tflite.tflite"
+    model_h5_simple_path = base_dir / "modelos" / "modelo stefano" / "modelo_simple_tflite.h5"
+    scaler_tflite_path = base_dir / "modelos" / "modelo stefano" / "scaler_4_features_tflite.pkl"
+    
+    # Fallback: LSTM antiguo (requiere TensorFlow completo)
+    model_h5_lstm_path = base_dir / "modelos" / "modelo stefano" / "modelo_lstm_3_features (1).h5"
+    scaler_lstm_path = base_dir / "modelos" / "modelo stefano" / "scaler_4_features.pkl"
+    
     csv_path = base_dir / "Codigos_arduinos" / "data" / "sensor_data.csv"
 
     # Comprobaciones
-    if not scaler_path.exists():
-        raise FileNotFoundError(f"Scaler no encontrado: {scaler_path}")
     if not csv_path.exists():
         raise FileNotFoundError(f"CSV no encontrado: {csv_path}")
 
-    # Intentar cargar modelo TFLite (con tflite_runtime si está disponible)
+    # ===== ESTRATEGIA DE CARGA DE MODELOS =====
+    # 1. Intentar modelo TFLite simple (compatible con tflite-runtime)
+    # 2. Si falla, intentar modelo LSTM .h5 (requiere TensorFlow)
+    
     model_predict = None
+    scaler = None
+    usar_flatten = False  # Flag para saber si necesitamos aplanar las secuencias
     
-    # Verificar que al menos uno de los modelos exista
-    if not model_tflite_path.exists() and not model_h5_path.exists():
-        raise FileNotFoundError(f"No se encontró ningún modelo (.tflite o .h5)")
+    import joblib
     
-    # SIEMPRE intentar TFLite primero
-    if model_tflite_path.exists():
+    # === INTENTO 1: Modelo Simple TFLite (sin TensorFlow) ===
+    if model_tflite_simple_path.exists() and scaler_tflite_path.exists():
         try:
-            print(f"🔄 Intentando cargar modelo TFLite desde {model_tflite_path.name}...")
+            print(f"🔄 Intentando modelo TFLite simple: {model_tflite_simple_path.name}")
             
-            # Intentar con tflite_runtime primero (sin TensorFlow)
+            # Cargar scaler
+            scaler = joblib.load(scaler_tflite_path)
+            
+            # Intentar cargar con tflite_runtime (sin TensorFlow)
             try:
                 import tflite_runtime.interpreter as tflite
                 print(f"✅ Usando tflite_runtime (sin TensorFlow)")
             except ImportError:
-                # Si no hay tflite_runtime, intentar con tensorflow.lite
-                try:
-                    import tensorflow as tf
-                    tflite = tf.lite
-                    print(f"⚠️  tflite_runtime no disponible, usando tensorflow.lite")
-                except ImportError:
-                    raise ImportError("No se encontró ni tflite_runtime ni tensorflow")
+                # Fallback a tensorflow.lite
+                import tensorflow as tf
+                tflite = tf.lite
+                print(f"⚠️  tflite_runtime no disponible, usando tensorflow.lite")
             
-            interpreter = tflite.Interpreter(model_path=str(model_tflite_path))
+            interpreter = tflite.Interpreter(model_path=str(model_tflite_simple_path))
             interpreter.allocate_tensors()
             
             input_details = interpreter.get_input_details()
@@ -60,29 +66,48 @@ def run_prediction(horas_futuro=6):
                 return interpreter.get_tensor(output_details[0]['index'])
             
             model_predict = predict_tflite
-            print(f"✅ Modelo TFLite cargado exitosamente")
+            usar_flatten = True  # Modelo Dense necesita entrada aplanada
+            print(f"✅ Modelo TFLite simple cargado exitosamente")
             
         except Exception as e:
-            print(f"❌ Error al cargar TFLite: {type(e).__name__}: {str(e)[:150]}")
-            # Si TFLite falla, intentar .h5 como último recurso
-            if model_h5_path.exists():
-                print(f"🔄 Fallback: Intentando cargar modelo .h5 con TensorFlow...")
-                try:
-                    import tensorflow as tf
-                    from tensorflow import keras
-                    model = keras.models.load_model(model_h5_path, compile=False)
-                    model_predict = lambda X: model.predict(X, verbose=0)
-                    print(f"✅ Modelo Keras (.h5) cargado exitosamente")
-                except ImportError:
-                    raise ImportError(f"❌ TFLite falló y TensorFlow no está instalado. Instala tflite-runtime o tensorflow.")
-            else:
-                raise FileNotFoundError(f"❌ TFLite falló y no se encontró modelo .h5 de respaldo")
+            print(f"❌ Error cargando TFLite simple: {type(e).__name__}: {str(e)[:100]}")
+            model_predict = None
     
-    # Si no se pudo cargar ningún modelo, error
+    # === INTENTO 2: Modelo LSTM .h5 (requiere TensorFlow) ===
     if model_predict is None:
-        raise RuntimeError("No se pudo cargar ningún modelo (ni .tflite ni .h5)")
-    import joblib
-    scaler = joblib.load(scaler_path)
+        if model_h5_lstm_path.exists() and scaler_lstm_path.exists():
+            try:
+                print(f"🔄 Fallback: Cargando modelo LSTM .h5 con TensorFlow...")
+                
+                import tensorflow as tf
+                from tensorflow import keras
+                
+                model = keras.models.load_model(model_h5_lstm_path, compile=False)
+                scaler = joblib.load(scaler_lstm_path)
+                
+                model_predict = lambda X: model.predict(X, verbose=0)
+                usar_flatten = False  # LSTM usa secuencias 3D
+                print(f"✅ Modelo LSTM .h5 cargado exitosamente")
+                
+            except ImportError:
+                raise ImportError(
+                    "❌ No se pudo cargar ningún modelo.\n"
+                    "   • TFLite simple no está disponible o falló\n"
+                    "   • LSTM .h5 requiere TensorFlow (no instalado)\n"
+                    "   Solución: Instala 'tensorflow' o entrena el modelo TFLite simple"
+                )
+            except Exception as e:
+                raise RuntimeError(f"❌ Error cargando modelo LSTM: {e}")
+        else:
+            raise FileNotFoundError(
+                "❌ No se encontró ningún modelo disponible:\n"
+                f"   • TFLite simple: {model_tflite_simple_path.name} ({'✅' if model_tflite_simple_path.exists() else '❌'})\n"
+                f"   • LSTM .h5: {model_h5_lstm_path.name} ({'✅' if model_h5_lstm_path.exists() else '❌'})"
+            )
+    
+    # Verificar que tenemos modelo y scaler
+    if model_predict is None or scaler is None:
+        raise RuntimeError("No se pudo inicializar el modelo correctamente")
 
     df = pd.read_csv(csv_path)
     
@@ -122,7 +147,14 @@ def run_prediction(horas_futuro=6):
 
     predicciones_temp = []
     for i in range(n_predicciones):
-        X_input = ventana_actual.reshape(1, n_pasos, n_features)
+        # Preparar input según el tipo de modelo
+        if usar_flatten:
+            # Modelo Dense (TFLite simple): aplanar ventana
+            X_input = ventana_actual.flatten().reshape(1, -1)
+        else:
+            # Modelo LSTM: mantener forma 3D
+            X_input = ventana_actual.reshape(1, n_pasos, n_features)
+        
         pred_scaled = model_predict(X_input)[0][0]
         
         # Calcular timestamp futuro

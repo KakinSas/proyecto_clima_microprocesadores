@@ -1,52 +1,79 @@
 # Instrucciones para Raspberry Pi Zero 2 W
 
-## ⚠️ ADVERTENCIA IMPORTANTE
+## ✅ SOLUCIÓN IMPLEMENTADA
 
-El modelo LSTM utilizado en este proyecto contiene operaciones **Flex** que requieren TensorFlow completo para funcionar. Aunque el código intentará usar TensorFlow Lite primero, **fallará** con este error:
+Ahora existen **DOS modelos** para máxima compatibilidad:
 
-```
-RuntimeError: Encountered unresolved custom op: FlexTensorListReserve
-Node number 0 (FlexTensorListReserve) failed to prepare.
-```
+1. **Modelo Simple TFLite** (⭐ RECOMENDADO PARA RASPBERRY PI):
+   - Archivo: `modelo_simple_tflite.tflite`
+   - Arquitectura: Dense (sin LSTM)
+   - Compatible con: `tflite-runtime` (sin TensorFlow)
+   - Ventajas: ✅ Ligero, ✅ Rápido, ✅ Sin dependencias pesadas
+
+2. **Modelo LSTM** (Fallback, requiere TensorFlow):
+   - Archivo: `modelo_lstm_3_features (1).h5`
+   - Arquitectura: LSTM
+   - Requiere: TensorFlow completo
+   - Ventajas: ⚡ Mayor precisión temporal
 
 ## 🔄 Flujo de Carga del Modelo
 
-El código `predecir_futuro.py` sigue esta estrategia:
+El código `predecir_futuro.py` sigue esta estrategia automática:
 
-1. **Intento 1**: Cargar `modelo_lstm_3_features.tflite` con `tflite-runtime`
-   - ❌ **Fallará** por operaciones Flex
-   
-2. **Intento 2**: Cargar `modelo_lstm_3_features.tflite` con `tensorflow.lite`
-   - ❌ **Fallará** si TensorFlow no está instalado
-   
-3. **Fallback**: Cargar `modelo_lstm_3_features (1).h5` con TensorFlow completo
-   - ✅ **Funcionará** si TensorFlow está instalado
+### Intento 1: Modelo TFLite Simple (PRIORITARIO)
+```
+🔄 Intentando modelo TFLite simple: modelo_simple_tflite.tflite
+✅ Usando tflite_runtime (sin TensorFlow)
+✅ Modelo TFLite simple cargado exitosamente
+```
+- ✅ Funciona con **solo** `tflite-runtime`
+- ✅ No requiere TensorFlow
+- ✅ Ligero y rápido
+
+### Intento 2: Modelo LSTM .h5 (FALLBACK)
+```
+🔄 Fallback: Cargando modelo LSTM .h5 con TensorFlow...
+✅ Modelo LSTM .h5 cargado exitosamente
+```
+- ⚠️ Requiere TensorFlow completo
+- ⚡ Mayor precisión temporal
 
 ## 📦 Instalación en Raspberry Pi
 
-### Opción A: Solo tflite-runtime (FALLARÁ, pero lo intentará)
+### Opción A: Solo tflite-runtime (⭐ RECOMENDADO - Ligero y rápido)
 
 ```bash
 cd ~/proyecto/proyecto_clima_microprocesadores
 git pull
 
-# Instalar tflite-runtime (funcionará la instalación)
+# 1. Entrenar modelo TFLite simple (HACER EN TU PC, NO EN RASPBERRY)
+# Ve a modelos/modelo stefano/ y ejecuta el notebook:
+# entrenar_modelo_simple_tflite.ipynb
+
+# 2. Copiar archivos generados a Raspberry Pi (después de entrenar):
+# - modelo_simple_tflite.tflite
+# - modelo_simple_tflite.h5 (opcional, backup)
+# - scaler_4_features_tflite.pkl
+
+# 3. Instalar tflite-runtime en Raspberry Pi
 pip3 install tflite-runtime --break-system-packages
 
-# Instalar otras dependencias
+# 4. Instalar otras dependencias
 pip3 install Flask flask-cors python-dotenv pytz bleak pandas scikit-learn joblib numpy --break-system-packages
 
-# Ejecutar (fallará al predecir, mostrará error de Flex ops)
+# 5. Ejecutar
 python3 app.py
 ```
 
-**Resultado esperado**: El servidor Flask arrancará, pero las predicciones fallarán con:
+**Resultado esperado**: 
 ```
-❌ Error al cargar TFLite: RuntimeError: Encountered unresolved custom op: FlexTensorListReserve
-❌ Modelo .h5 no encontrado o TensorFlow no instalado
+🔄 Intentando modelo TFLite simple: modelo_simple_tflite.tflite
+✅ Usando tflite_runtime (sin TensorFlow)
+✅ Modelo TFLite simple cargado exitosamente
+[PREDICCIONES FUNCIONARÁN ✅]
 ```
 
-### Opción B: TensorFlow completo (RECOMENDADO, funcionará)
+### Opción B: TensorFlow completo (Solo si quieres usar el modelo LSTM)
 
 ```bash
 cd ~/proyecto/proyecto_clima_microprocesadores
@@ -58,16 +85,17 @@ pip3 install tensorflow==2.8.0 --break-system-packages
 # Instalar otras dependencias
 pip3 install Flask flask-cors python-dotenv pytz bleak pandas scikit-learn joblib numpy --break-system-packages
 
-# Ejecutar (funcionará completamente)
+# Ejecutar
 python3 app.py
 ```
 
 **Resultado esperado**: 
 ```
-🔄 Intentando cargar modelo TFLite...
-❌ Error al cargar TFLite: RuntimeError: Encountered unresolved custom op...
-🔄 Fallback: Intentando cargar modelo .h5 con TensorFlow...
-✅ Modelo Keras cargado exitosamente
+🔄 Intentando modelo TFLite simple: modelo_simple_tflite.tflite
+✅ Modelo TFLite simple cargado exitosamente
+[O si no existe el TFLite simple:]
+🔄 Fallback: Cargando modelo LSTM .h5 con TensorFlow...
+✅ Modelo LSTM .h5 cargado exitosamente
 ```
 
 ## 🧪 Logs Esperados
