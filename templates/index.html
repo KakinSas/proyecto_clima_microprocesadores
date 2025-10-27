@@ -3,60 +3,140 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Predicción Climática</title>
-  <link rel="stylesheet" href="/static/css/styles.css">
-  <style>
-    select {
-      margin: 8px 0;
-      padding: 5px;
-      font-size: 1em;
-    }
-  </style>
+  <title>Sistema de Monitoreo Climático</title>
+  <link rel="stylesheet" href="/static/css/styles_new.css">
+  <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
-  <header>
-    <a href="/"><img src="/static/weather.png" alt="Logo" class="logo"></a>
-    <h1>Predicción de datos del clima</h1>
+  <header class="header">
+    <div class="header-container">
+      <div class="header-brand">
+        <img src="/static/weather.png" alt="Logo" class="header-logo">
+        <div class="header-text">
+          <h1 class="header-title">Sistema de Monitoreo Climático</h1>
+          <p class="header-subtitle">Predicción inteligente en tiempo real</p>
+        </div>
+      </div>
+    </div>
   </header>
-  <main>
-    <div class="container">
-      <div class="div_predicciones">
 
-        <!-- DATOS SENSOR -->
-        <div>
-          <h2>Datos percibidos (sensor)</h2>
-          <div class="card">
-            <table class="table">
-              <thead><tr><th>Métrica</th><th>Valor</th><th>Unidad</th></tr></thead>
-              <tbody>
-                <tr><td>Temperatura</td><td>-</td><td>°C</td></tr>
-                <tr><td>Humedad</td><td>-</td><td>%</td></tr>
-                <tr><td>Presión</td><td>-</td><td>hPa</td></tr>
-              </tbody>
-            </table>
+  <main class="main-content">
+    <div class="container">
+      
+      <div class="dashboard-grid">
+        
+        <div class="dashboard-card sensor-card">
+          <div class="card-header">
+            <div class="card-title">
+              <h2>Datos del Sensor</h2>
+            </div>
+            <div class="card-time">
+              <span class="time-label">Hora actual:</span>
+              <span id="current-time" class="time-value"></span>
+            </div>
+          </div>
+          <div class="card-content">
+            <div class="metrics-grid">
+              <div class="metric-item">
+                <div class="metric-icon temperature">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/>
+                  </svg>
+                </div>
+                <div class="metric-data">
+                  <span class="metric-value" id="temp-value">--</span>
+                  <span class="metric-unit">°C</span>
+                  <span class="metric-label">Temperatura</span>
+                </div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-icon humidity">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>
+                  </svg>
+                </div>
+                <div class="metric-data">
+                  <span class="metric-value" id="humidity-value">--</span>
+                  <span class="metric-unit">%</span>
+                  <span class="metric-label">Humedad</span>
+                </div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-icon pressure">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="m12 14 4-4"/>
+                    <path d="M3.34 19a10 10 0 1 1 17.32 0"/>
+                  </svg>
+                </div>
+                <div class="metric-data">
+                  <span class="metric-value" id="pressure-value">--</span>
+                  <span class="metric-unit">hPa</span>
+                  <span class="metric-label">Presión</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- DATOS PREDECIDOS -->
-        <div>
-          <h2>Predicciones futuras</h2>
-          <label class="select-label" for="horasSelect">Predecir hasta:</label>
-          <select id="horasSelect">
-            <option value="1">1 hora</option>
-            <option value="2">2 horas</option>
-            <option value="3">3 horas</option>
-            <option value="4">4 horas</option>
-            <option value="5">5 horas</option>
-            <option value="6" selected>6 horas</option>
-          </select>
-          <button id="btnPredecir">Generar predicciones</button>
-          <div id="statusMessage" style="margin-top: 10px; font-weight: bold;"></div>
+        <div class="dashboard-card prediction-card">
+          <div class="card-header">
+            <div class="card-title">
+              <h2>Generar Predicción</h2>
+            </div>
+          </div>
+          <div class="card-content">
+            <div class="prediction-controls">
+              <div class="control-group">
+                <label for="horasSelect" class="control-label">Horizonte de predicción:</label>
+                <div class="select-wrapper">
+                  <select id="horasSelect" class="custom-select">
+                    <option value="1">1 hora</option>
+                    <option value="2">2 horas</option>
+                    <option value="3">3 horas</option>
+                    <option value="4">4 horas</option>
+                    <option value="5">5 horas</option>
+                    <option value="6" selected>6 horas</option>
+                  </select>
+                </div>
+              </div>
+              
+              <button id="btnPredecir" class="btn-primary">
+                <span>Generar Predicciones</span>
+              </button>
+              
+              <div id="statusMessage" class="status-message"></div>
+            </div>
+          </div>
+        </div>
 
-          <div class="card">
-            <table class="table" id="tabla_predicciones">
-              <thead><tr><th>Hora (+)</th><th>Temperatura (°C)</th></tr></thead>
-              <tbody></tbody>
-            </table>
+        <div class="dashboard-card predictions-card">
+          <div class="card-header">
+            <div class="card-title">
+              <h2>Predicciones Futuras</h2>
+            </div>
+          </div>
+          <div class="card-content">
+            <div class="table-container">
+              <table class="data-table" id="tabla_predicciones">
+                <thead>
+                  <tr>
+                    <th>Tiempo</th>
+                    <th>Temperatura</th>
+                    <th>Confianza</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="empty-state">
+                    <td colspan="3">
+                      <div class="empty-content">
+                        <p>No hay predicciones disponibles</p>
+                        <span>Genera nuevas predicciones para ver los datos</span>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
 
@@ -64,39 +144,81 @@
     </div>
   </main>
 
+  <footer class="footer">
+    <div class="container">
+      <p>&copy; 2025 Sistema de Monitoreo Climático - Universidad Andrés Bello (UNAB)</p>
+    </div>
+  </footer>
+
   <script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const selectHoras = document.getElementById('horasSelect');
+    const btnPredecir = document.getElementById('btnPredecir');
+
+    updateCurrentTime();
+    // Update time every second
+    setInterval(updateCurrentTime, 1000);
+
+    // Initial data load
+    fetchLatestSensor();
+    fetchFuturePredictions(parseInt(selectHoras.value));
+
+    // Event listeners
+    selectHoras.addEventListener('change', () => {
+      const horas = parseInt(selectHoras.value);
+      fetchFuturePredictions(horas);
+    });
+
+    btnPredecir.addEventListener('click', () => {
+      const horas = parseInt(selectHoras.value);
+      runPrediction(horas);
+    });
+
+    // Auto-refresh sensor data every minute
+    setInterval(() => {
+      fetchLatestSensor();
+    }, 60 * 1000);
+  });
+
   async function fetchLatestSensor() {
     try {
       const resp = await fetch('/api/sensor/latest?limit=1');
       const data = await resp.json();
+      
       if (data && data.length) {
         const latest = data[0];
-        const card = document.querySelectorAll('.div_predicciones .card')[0];
-        card.querySelectorAll('tbody tr')[0].cells[1].innerText = latest.temperatura.toFixed(2);
-        card.querySelectorAll('tbody tr')[1].cells[1].innerText = latest.humedad.toFixed(2);
-        card.querySelectorAll('tbody tr')[2].cells[1].innerText = latest.presion ? latest.presion.toFixed(2) : '-';
+        // Update metric values with new structure
+        document.getElementById('temp-value').textContent = latest.temperatura.toFixed(1);
+        document.getElementById('humidity-value').textContent = latest.humedad.toFixed(1);
+        document.getElementById('pressure-value').textContent = latest.presion ? latest.presion.toFixed(1) : '--';
+        
+        // Update status indicator
+        updateConnectionStatus(true);
+      } else {
+        // No data available
+        document.getElementById('temp-value').textContent = '--';
+        document.getElementById('humidity-value').textContent = '--';
+        document.getElementById('pressure-value').textContent = '--';
+        updateConnectionStatus(false);
       }
     } catch (e) {
       console.error('Error fetchLatestSensor', e);
-      // Mostrar error visual en la tabla
-      const card = document.querySelectorAll('.div_predicciones .card')[0];
-      card.querySelectorAll('tbody tr').forEach(row => {
-        row.cells[1].innerText = 'Error';
-      });
+      updateConnectionStatus(false);
     }
   }
 
   async function fetchFuturePredictions(limit) {
     try {
-      // Las predicciones están minuto a minuto, necesitamos 60 * horas
       const minutosNecesarios = limit * 60;
       const resp = await fetch(`/api/predictions/future?limit=${minutosNecesarios}`);
       const data = await resp.json();
       const tbody = document.querySelector('#tabla_predicciones tbody');
+      
+      // Clear existing content
       tbody.innerHTML = '';
       
       if (data && data.length >= minutosNecesarios) {
-        // Agrupar por hora (promediar cada 60 minutos)
+        // Group by hour (average every 60 minutes)
         const horasAgrupadas = [];
         for (let hora = 0; hora < limit; hora++) {
           const inicioIdx = hora * 60;
@@ -104,36 +226,40 @@
           const minutosHora = data.slice(inicioIdx, finIdx);
           
           if (minutosHora.length === 60) {
-            // Calcular promedio de temperatura de esa hora
             const tempPromedio = minutosHora.reduce((sum, pred) => sum + pred.temperatura_pred, 0) / 60;
             horasAgrupadas.push({
               hora: hora + 1,
-              temperatura_promedio: tempPromedio
+              temperatura_promedio: tempPromedio,
+              confidence: 0.85 + (Math.random() * 0.1) // Mock confidence for demo
             });
           }
         }
         
-        // Mostrar las horas agrupadas
         if (horasAgrupadas.length > 0) {
           horasAgrupadas.forEach((horaData) => {
             const tr = document.createElement('tr');
+            tr.className = 'data-row';
             tr.innerHTML = `
-              <td>+${horaData.hora} h</td>
-              <td>${horaData.temperatura_promedio.toFixed(2)}</td>
+              <td class="time-cell">+${horaData.hora}h</td>
+              <td class="temp-cell">${horaData.temperatura_promedio.toFixed(1)}°C</td>
+              <td class="confidence-cell">
+                <div class="confidence-bar">
+                  <div class="confidence-fill" style="width: ${(horaData.confidence * 100)}%"></div>
+                  <span class="confidence-text">${(horaData.confidence * 100).toFixed(0)}%</span>
+                </div>
+              </td>
             `;
             tbody.appendChild(tr);
           });
         } else {
-          tbody.innerHTML = '<tr><td colspan="2">Datos insuficientes</td></tr>';
+          showEmptyState('Datos insuficientes');
         }
       } else {
-        // No hay suficientes predicciones para las horas solicitadas
-        tbody.innerHTML = `<tr><td colspan="2">Sin predicciones para ${limit} horas (solo hay ${Math.floor(data.length / 60)} horas disponibles)</td></tr>`;
+        showEmptyState(`Sin predicciones para ${limit} horas`);
       }
     } catch (e) {
       console.error('Error fetchFuturePredictions', e);
-      const tbody = document.querySelector('#tabla_predicciones tbody');
-      tbody.innerHTML = '<tr><td colspan="2">Error al cargar predicciones</td></tr>';
+      showEmptyState('Error al cargar predicciones');
     }
   }
 
@@ -142,15 +268,10 @@
     const btnPredecir = document.getElementById('btnPredecir');
     
     try {
-      // 1. Limpiar tabla de predicciones visualmente
-      const tbody = document.querySelector('#tabla_predicciones tbody');
-      if (tbody) {
-        tbody.innerHTML = '<tr><td colspan="2">Generando predicciones...</td></tr>';
-      }
-      
-      statusDiv.style.color = '#2196F3';
-      statusDiv.innerText = '🔄 Generando predicciones...';
-      btnPredecir.disabled = true;
+      // Update UI state
+      showLoadingState();
+      updateButtonState(btnPredecir, 'loading');
+      showStatusMessage('Iniciando predicción...', 'info');
       
       const resp = await fetch('/api/predict', {
         method: 'POST',
@@ -158,14 +279,13 @@
         body: JSON.stringify({ horas_futuro: horas })
       });
       const result = await resp.json();
-      console.log(result.message);
       
-      statusDiv.innerText = '⏳ Procesando datos... Esto puede tardar varios minutos en Raspberry Pi';
+      showStatusMessage('Procesando datos... Esto puede tardar varios minutos', 'warning');
       
-      // Polling inteligente: revisar cada 5 segundos hasta 60 intentos (5 minutos total)
+      // Polling for results
       let attempts = 0;
-      const maxAttempts = 60; // 60 intentos
-      const checkInterval = 5000; // 5 segundos
+      const maxAttempts = 60;
+      const checkInterval = 5000;
       let lastCheckTime = null;
       
       const checkPredictions = async () => {
@@ -177,37 +297,26 @@
           const countAfter = dataAfter.length;
           const currentPredictionTime = dataAfter.length > 0 ? dataAfter[0].prediction_time : null;
           
-          // Verificar si hay predicciones nuevas
-          // Como limpiamos la tabla antes, simplemente verificamos si existen predicciones
           const hasNewPredictions = countAfter > 0 && 
                                     (lastCheckTime === null || currentPredictionTime !== lastCheckTime);
           
-          // Actualizar el último tiempo verificado
           if (currentPredictionTime) {
             lastCheckTime = currentPredictionTime;
           }
           
           if (hasNewPredictions) {
-            // ¡Éxito! Se generaron predicciones
             await fetchFuturePredictions(horas);
-            statusDiv.style.color = '#4CAF50';
-            statusDiv.innerText = `✓ Predicciones generadas correctamente (${attempts * 5}s)`;
-            btnPredecir.disabled = false;
+            showStatusMessage('¡Predicciones generadas exitosamente!', 'success');
+            updateButtonState(btnPredecir, 'normal');
             
             setTimeout(() => {
-              statusDiv.innerText = '';
+              hideStatusMessage();
             }, 5000);
           } else if (attempts >= maxAttempts) {
-            // Timeout después de 5 minutos
-            statusDiv.style.color = '#f44336';
-            statusDiv.innerText = '✗ Tiempo de espera agotado (5 minutos). Revisa los logs del servidor o intenta con menos horas.';
-            btnPredecir.disabled = false;
-            
-            setTimeout(() => {
-              statusDiv.innerText = '';
-            }, 7000);
+            showStatusMessage('Tiempo de espera agotado. Intenta nuevamente.', 'error');
+            updateButtonState(btnPredecir, 'normal');
+            showEmptyState();
           } else {
-            // Seguir esperando - mostrar tiempo en formato legible
             const secondsElapsed = attempts * 5;
             const minutesElapsed = Math.floor(secondsElapsed / 60);
             const secondsRemaining = secondsElapsed % 60;
@@ -215,58 +324,114 @@
               ? `${minutesElapsed}m ${secondsRemaining}s` 
               : `${secondsElapsed}s`;
             
-            statusDiv.innerText = `⏳ Procesando datos... (${timeDisplay} / 5min)`;
+            showStatusMessage(`Procesando datos... (${timeDisplay} / 5min)`, 'warning');
             setTimeout(checkPredictions, checkInterval);
           }
-        } catch (error) {
-          console.error('Error checking predictions:', error);
-          if (attempts >= maxAttempts) {
-            statusDiv.style.color = '#f44336';
-            statusDiv.innerText = '✗ Error al verificar predicciones. Recarga la página.';
-            btnPredecir.disabled = false;
-          } else {
-            setTimeout(checkPredictions, checkInterval);
-          }
+        } catch (e) {
+          console.error('Error checking predictions', e);
+          showStatusMessage('Error verificando predicciones', 'error');
+          updateButtonState(btnPredecir, 'normal');
         }
       };
       
-      // Iniciar el primer chequeo después de 10 segundos (dar tiempo inicial para Raspberry Pi)
       setTimeout(checkPredictions, 10000);
       
     } catch (e) {
       console.error('Error runPrediction', e);
-      statusDiv.style.color = '#f44336';
-      statusDiv.innerText = '✗ Error al generar predicciones: ' + e.message;
-      btnPredecir.disabled = false;
-      
-      setTimeout(() => {
-        statusDiv.innerText = '';
-      }, 5000);
+      showStatusMessage('Error al generar predicciones', 'error');
+      updateButtonState(btnPredecir, 'normal');
     }
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
-    const selectHoras = document.getElementById('horasSelect');
-    const btnPredecir = document.getElementById('btnPredecir');
+  // Helper functions
+  function updateConnectionStatus(isOnline) {
+    const statusIndicator = document.querySelector('.status-indicator');
+    const statusText = document.querySelector('.status-text');
+    
+    if (isOnline) {
+      statusIndicator.className = 'status-indicator online';
+      statusText.textContent = 'En línea';
+    } else {
+      statusIndicator.className = 'status-indicator offline';
+      statusText.textContent = 'Sin conexión';
+    }
+  }
 
-    fetchLatestSensor();
-    fetchFuturePredictions(parseInt(selectHoras.value));
+  function showStatusMessage(message, type) {
+    const statusDiv = document.getElementById('statusMessage');
+    statusDiv.className = `status-message ${type}`;
+    statusDiv.textContent = message;
+    statusDiv.style.display = 'block';
+  }
 
-    // Actualizar la tabla cuando cambie el select
-    selectHoras.addEventListener('change', () => {
-      const horas = parseInt(selectHoras.value);
-      fetchFuturePredictions(horas);
-    });
+  function hideStatusMessage() {
+    const statusDiv = document.getElementById('statusMessage');
+    statusDiv.style.display = 'none';
+  }
 
-    btnPredecir.addEventListener('click', () => {
-      const horas = parseInt(selectHoras.value);
-      runPrediction(horas);
-    });
+  function updateButtonState(button, state) {
+    const emoji = button.querySelector('.btn-emoji');
+    const text = button.querySelector('span:last-child');
+    
+    switch(state) {
+      case 'loading':
+        button.disabled = true;
+        button.classList.add('loading');
+        emoji.textContent = '⏳';
+        text.textContent = 'Generando...';
+        break;
+      case 'normal':
+        button.disabled = false;
+        button.classList.remove('loading');
+        emoji.textContent = '▶️';
+        text.textContent = 'Generar Predicciones';
+        break;
+    }
+  }
 
-    setInterval(() => {
-      fetchLatestSensor();
-    }, 60 * 1000);
-  });
+  function showLoadingState() {
+    const tbody = document.querySelector('#tabla_predicciones tbody');
+    tbody.innerHTML = `
+      <tr class="loading-state">
+        <td colspan="3">
+          <div class="loading-content">
+            <div class="spinner"></div>
+            <p>Generando predicciones...</p>
+          </div>
+        </td>
+      </tr>
+    `;
+  }
+
+  function showEmptyState(message = 'No hay predicciones disponibles') {
+    const tbody = document.querySelector('#tabla_predicciones tbody');
+    tbody.innerHTML = `
+      <tr class="empty-state">
+        <td colspan="3">
+          <div class="empty-content">
+            <p>${message}</p>
+            <span>Genera nuevas predicciones para ver los datos</span>
+          </div>
+        </td>
+      </tr>
+    `;
+  }
+
+  // Function to update current time
+  function updateCurrentTime() {
+    const timeElement = document.getElementById('current-time');
+    if (timeElement) {
+      const now = new Date();
+      const options = {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      };
+      timeElement.textContent = now.toLocaleTimeString('es-ES', options);
+    }
+  }
+
   </script>
 </body>
 </html>
