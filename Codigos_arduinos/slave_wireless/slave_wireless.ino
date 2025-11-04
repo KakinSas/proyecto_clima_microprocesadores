@@ -12,6 +12,9 @@ const unsigned long INTERVALO_LED = 2000; // 2 segundos
 unsigned long ultimoParpadeoLED = 0;
 bool estadoLED = false;
 
+// Control de primera conexión
+bool primeraConexion = true;
+
 // Servicio BLE personalizado
 BLEService sensorService("19B10000-E8F2-537E-4F6C-D104768A1214");
 
@@ -52,7 +55,7 @@ void setup() {
   Serial.println("Intervalo de lectura: 10 minutos");
   Serial.println("Esperando conexion BLE para enviar primer dato...");
   
-  ultimaLectura = millis() - INTERVALO_LECTURA; // Forzar envío inmediato al conectar
+  ultimaLectura = millis();
 }
 
 void loop() {
@@ -67,6 +70,35 @@ void loop() {
   }
 
   if (BLE.connected()) {
+    // Enviar primer dato inmediatamente al conectar
+    if (primeraConexion) {
+      Serial.println("Primera conexion BLE detectada - Enviando primer dato...");
+      delay(2000); // Esperar 2 segundos para estabilizar conexión
+      
+      float temperatura = HTS.readTemperature();
+      float humedad = HTS.readHumidity();
+      float presion = BARO.readPressure();
+      
+      String datos = "T:" + String(temperatura, 2) + 
+                     ",H:" + String(humedad, 2) + 
+                     ",P:" + String(presion, 2);
+      
+      dataChar.writeValue(datos.c_str());
+      Serial.println(datos);
+      Serial.println("Primer dato enviado - Siguiente en 10 minutos");
+      
+      ultimaLectura = tiempoActual;
+      primeraConexion = false;
+      
+      // Triple parpadeo para indicar primer envío
+      for (int i = 0; i < 3; i++) {
+        digitalWrite(LED_BUILTIN, HIGH);
+        delay(100);
+        digitalWrite(LED_BUILTIN, LOW);
+        delay(100);
+      }
+    }
+    
     // Verificar si han pasado 10 minutos
     if (tiempoActual - ultimaLectura >= INTERVALO_LECTURA) {
       // Leer sensores
@@ -97,8 +129,9 @@ void loop() {
       }
     }
   } else {
-    // Si no hay conexión, reanudar advertising
+    // Si no hay conexión, reanudar advertising y resetear flag
     BLE.advertise();
+    primeraConexion = true;
   }
   
   // Pequeño delay para no saturar el loop
