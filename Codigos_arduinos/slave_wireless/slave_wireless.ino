@@ -45,8 +45,9 @@ void setup() {
   BLE.advertise();
   Serial.println("Arduino Wireless - Iniciado");
   Serial.println("Intervalo de lectura: 10 minutos");
+  Serial.println("Esperando conexion BLE para enviar primer dato...");
   
-  ultimaLectura = millis(); // Inicializar el tiempo
+  ultimaLectura = millis() - INTERVALO_LECTURA; // Forzar envío inmediato al conectar
 }
 
 void loop() {

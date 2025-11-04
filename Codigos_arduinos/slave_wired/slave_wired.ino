@@ -25,7 +25,28 @@ void setup() {
   Serial.println("Arduino Wired - Iniciado");
   Serial.println("Intervalo de lectura: 10 minutos");
   
-  ultimaLectura = millis(); // Inicializar el tiempo
+  // Enviar primer dato inmediatamente
+  delay(2000); // Esperar 2 segundos para que se estabilicen los sensores
+  
+  float temperatura = HTS.readTemperature();
+  float humedad = HTS.readHumidity();
+  float presion = BARO.readPressure();
+  
+  Serial.print("T:");
+  Serial.print(temperatura, 2);
+  Serial.print(",H:");
+  Serial.print(humedad, 2);
+  Serial.print(",P:");
+  Serial.println(presion, 2);
+  
+  Serial.println("Primer dato enviado - Siguiente en 10 minutos");
+  
+  // Parpadear LED para indicar lectura
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(100);
+  digitalWrite(LED_BUILTIN, LOW);
+  
+  ultimaLectura = millis(); // Inicializar el tiempo después del primer envío
 }
 
 void loop() {
