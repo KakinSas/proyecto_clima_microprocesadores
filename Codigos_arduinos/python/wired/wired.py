@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 
 # Configuración del puerto serial
-SERIAL_PORT = "COM5"
+SERIAL_PORT = "/dev/ttyACM0"  # Puerto para Raspberry Pi (cambiar a COM5 en Windows)
 BAUD_RATE = 9600
 
 # Ruta al archivo CSV (relativa al directorio del proyecto)

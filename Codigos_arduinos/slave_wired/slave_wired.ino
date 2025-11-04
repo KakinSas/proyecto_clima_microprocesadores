@@ -57,8 +57,4 @@ void loop() {
   
   // Pequeño delay para no saturar el loop
   delay(100);
-    Serial.println(" kPa");
-  }
-  
-  Serial.println("---FIN_BUFFER---");
 }
