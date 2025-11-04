@@ -20,14 +20,30 @@ def import_module_from_path(module_name, file_path):
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 wired_path = os.path.join(SCRIPT_DIR, 'wired', 'wired.py')
 wireless_path = os.path.join(SCRIPT_DIR, 'wireless', 'wireless.py')
+db_path = os.path.join(SCRIPT_DIR, 'db', 'mongodb_handler.py')
 
 # Importar módulos
 wired = import_module_from_path('wired', wired_path)
 wireless = import_module_from_path('wireless', wireless_path)
+mongodb_handler = import_module_from_path('mongodb_handler', db_path)
+
+# MongoDB URI
+MONGODB_URI = "mongodb+srv://benjotenks:msfaObufcIQ6IP6d@cluster0.d18af.mongodb.net/microprocesadores"
 
 # Variables de control
 wired_running = True
 wireless_running = True
+db_handler = None
+
+def init_database():
+    """Inicializa la conexión a MongoDB"""
+    global db_handler
+    try:
+        db_handler = mongodb_handler.MongoDBHandler(MONGODB_URI)
+        return db_handler
+    except Exception as e:
+        print(f"✗ Error inicializando MongoDB: {e}")
+        return None
 
 def run_wired():
     """
@@ -41,7 +57,7 @@ def run_wired():
             else:
                 print("🔌 Iniciando módulo WIRED (Serial)...")
             
-            wired.main()
+            wired.main(db_handler=db_handler)
             
         except KeyboardInterrupt:
             break
@@ -63,7 +79,7 @@ async def run_wireless():
             else:
                 print("📡 Iniciando módulo WIRELESS (Bluetooth)...")
             
-            await wireless.main()
+            await wireless.main(db_handler=db_handler)
             
         except KeyboardInterrupt:
             break
@@ -77,16 +93,27 @@ async def main():
     """
     Función principal que ejecuta ambos módulos en paralelo
     """
+    global db_handler
+    
     print("="*70)
-    print("    Sistema de Adquisición de Datos - Dual Mode")
+    print("    Sistema de Adquisición de Datos - Buffer Horario + MongoDB")
     print("="*70)
-    print("📊 Ejecutando lecturas simultáneas con auto-reconexión:")
+    print("📊 Configuración del sistema:")
     print("   🔌 WIRED: Puerto Serial COM5")
     print("   📡 WIRELESS: Bluetooth (ArduinoEsclavo)")
-    print("   💾 Guardando en: data/sensor_data.csv")
+    print("   💾 CSV Local: data/sensor_data.csv")
+    print("   🗄️  MongoDB: Promedios horarios (6 muestras/hora)")
+    print("   ⏱️  Muestreo: Cada 10 minutos")
+    print("   📈 Interpolación: Automática si faltan datos")
     print("   🔄 Auto-reintento: Activado")
     print("="*70)
     print()
+    
+    # Inicializar MongoDB
+    db_handler = init_database()
+    
+    if db_handler is None:
+        print("⚠️ Continuando sin MongoDB (solo guardado local)")
     
     # Crear thread para el módulo wired (serial)
     wired_thread = threading.Thread(target=run_wired, daemon=True)
@@ -103,6 +130,8 @@ async def main():
         global wired_running, wireless_running
         wired_running = False
         wireless_running = False
+        if db_handler:
+            db_handler.close()
 
 def _ignore_sighup_if_possible():
     """Ignora SIGHUP para que el proceso continúe si se cierra la terminal (Linux/Raspberry Pi)."""
@@ -137,6 +166,8 @@ def run_supervisado():
             global wired_running, wireless_running
             wired_running = False
             wireless_running = False
+            if db_handler:
+                db_handler.close()
             break
         except Exception as e:
             reintentos = min(reintentos + 1, 6)

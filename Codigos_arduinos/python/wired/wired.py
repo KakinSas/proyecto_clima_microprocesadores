@@ -1,11 +1,10 @@
 import serial
 import csv
-import re
 import os
 from datetime import datetime
 
 # Configuración del puerto serial
-SERIAL_PORT = "/dev/ttyACM0"
+SERIAL_PORT = "COM5"
 BAUD_RATE = 9600
 
 # Ruta al archivo CSV (relativa al directorio del proyecto)
@@ -13,117 +12,89 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.join(SCRIPT_DIR, '..', '..')
 CSV_FILENAME = os.path.join(PROJECT_DIR, 'data', 'sensor_data.csv')
 
-def parse_registro(line):
+def parse_sensor_data(line):
     """
-    Parsea una línea de registro del formato:
-    Registro N - Temp: X.XX °C, Hum: X.XX %, Pres: X.XX kPa
+    Parsea la línea de datos del sensor
+    Formato esperado: T:25.5,H:60.0,P:1013.25
     """
-    # Patrón regex para extraer los valores
-    pattern = r'Registro\s+(\d+)\s+-\s+Temp:\s+([\d.]+)\s+°C,\s+Hum:\s+([\d.]+)\s+%,\s+Pres:\s+([\d.]+)\s+kPa'
-    match = re.match(pattern, line)
-    
-    if match:
-        temp = float(match.group(2))
-        hum = float(match.group(3))
-        pres = float(match.group(4))
+    try:
+        parts = line.split(',')
+        data = {}
+        for part in parts:
+            key, value = part.split(':')
+            data[key.strip()] = float(value.strip())
         
         return {
-            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'tipo': 'wired',
-            'temperatura': temp,
-            'humedad': hum,
-            'presion': pres
+            'temperature': data.get('T', 0),
+            'humidity': data.get('H', 0),
+            'pressure': data.get('P', 0)
         }
-    return None
-
-def save_to_csv(record):
-    """
-    Guarda un registro en el archivo CSV
-    """
-    try:
-        # Verificar si el archivo existe
-        try:
-            with open(CSV_FILENAME, 'r') as f:
-                file_exists = True
-        except FileNotFoundError:
-            file_exists = False
-        
-        # Abrir archivo en modo append
-        with open(CSV_FILENAME, 'a', newline='', encoding='utf-8') as csvfile:
-            fieldnames = ['timestamp', 'tipo', 'temperatura', 'humedad', 'presion']
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            
-            # Escribir encabezado solo si el archivo es nuevo
-            if not file_exists:
-                writer.writeheader()
-            
-            # Escribir registro
-            writer.writerow(record)
-        
     except Exception as e:
-        print(f"✗ Error al guardar en CSV: {e}")
+        print(f"✗ Error parseando datos: {e}")
+        return None
 
-def main():
-    """
-    Función principal que lee del puerto serial y guarda en CSV
-    """
-    print("="*60)
-    print("Script de recepción de datos - Arduino Cableado (Wired)")
-    print("="*60)
-    print(f"Puerto Serial: {SERIAL_PORT}")
-    print(f"Baud Rate: {BAUD_RATE}")
-    print(f"Guardando datos en: {CSV_FILENAME}\n")
+def save_to_csv(data, source, timestamp):
+    """Guarda los datos en CSV local"""
+    try:
+        # Crear carpeta data si no existe
+        os.makedirs(os.path.dirname(CSV_FILENAME), exist_ok=True)
+        
+        file_exists = os.path.isfile(CSV_FILENAME)
+        
+        with open(CSV_FILENAME, 'a', newline='') as f:
+            writer = csv.writer(f)
+            if not file_exists:
+                writer.writerow(['timestamp', 'source', 'temperature', 'humidity', 'pressure'])
+            
+            writer.writerow([
+                timestamp,
+                source,
+                data['temperature'],
+                data['humidity'],
+                data['pressure']
+            ])
+    except Exception as e:
+        print(f"✗ Error guardando en CSV: {e}")
+
+def main(db_handler=None):
+    """Función principal - Lee datos cuando el Arduino los envía"""
+    print(f"🔌 Conectando a puerto serial {SERIAL_PORT}...")
     
     try:
-        # Abrir puerto serial
         ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
         print(f"✓ Conectado a {SERIAL_PORT}")
-        print("Esperando datos...\n")
-        
-        buffer_count = 0
-        registro_count = 0
+        print("⏳ Esperando datos del Arduino (cada 10 minutos)...")
         
         while True:
-            try:
-                # Leer línea del serial
-                if ser.in_waiting > 0:
-                    line = ser.readline().decode('utf-8', errors='ignore').strip()
+            if ser.in_waiting > 0:
+                line = ser.readline().decode('utf-8').strip()
+                
+                if line and line.startswith('T:'):
+                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    print(f"📥 WIRED [{timestamp}]: {line}")
                     
-                    if line:
-                        # Detectar inicio de buffer
-                        if "Buffer lleno" in line:
-                            buffer_count += 1
-                            print(f"\n{'='*60}")
-                            print(f"📦 Buffer #{buffer_count} recibido")
-                            print(f"{'='*60}")
-                            registro_count = 0
+                    # Parsear los datos
+                    data = parse_sensor_data(line)
+                    
+                    if data:
+                        # Agregar al buffer de MongoDB
+                        if db_handler:
+                            db_handler.add_sample_to_buffer(
+                                source='wired',
+                                temperature=data['temperature'],
+                                humidity=data['humidity'],
+                                pressure=data['pressure']
+                            )
                         
-                        # Detectar fin de buffer
-                        elif "---FIN_BUFFER---" in line:
-                            print(f"✓ {registro_count} registros guardados en {CSV_FILENAME}")
-                            print()
-                        
-                        # Parsear y guardar registros
-                        else:
-                            record = parse_registro(line)
-                            if record:
-                                registro_count += 1
-                                # Mostrar en consola (innecesario)
-                                #print(f"Registro {registro_count} - Temp: {record['temperatura']} °C, "
-                                #      f"Hum: {record['humedad']} %, Pres: {record['presion']} kPa")
-                                
-                                # Guardar en CSV
-                                save_to_csv(record)
-                
-            except UnicodeDecodeError:
-                # Ignorar errores de decodificación
-                pass
-                
+                        # Guardar en CSV local (opcional)
+                        save_to_csv(data, 'wired', timestamp)
+                    
     except serial.SerialException as e:
-        print(f"✗ Error al abrir el puerto serial: {e}")
-        print(f"  Asegúrate de que el Arduino esté conectado a {SERIAL_PORT}")
-    except KeyboardInterrupt:
-        print("\n✓ Programa terminado por el usuario")
+        print(f"✗ Error de conexión serial: {e}")
+        raise
+    except Exception as e:
+        print(f"✗ Error inesperado: {e}")
+        raise
     finally:
         if 'ser' in locals() and ser.is_open:
             ser.close()
