@@ -35,6 +35,12 @@ def save_to_csv(data, source, timestamp):
     except Exception as e:
         print(f"Error guardando en CSV: {e}")
 
+def should_accept_sample():
+    """Verifica si estamos en un minuto válido para tomar muestras (10, 20, 30, 40, 50, 00)"""
+    now = datetime.now()
+    minute = now.minute
+    return minute % 10 == 0
+
 async def main(db_handler=None):
     print(f"Buscando dispositivo Bluetooth: {DEVICE_NAME}...")
     device = await BleakScanner.find_device_by_name(DEVICE_NAME, timeout=20.0)
@@ -42,22 +48,34 @@ async def main(db_handler=None):
         print(f"No se encontro el dispositivo {DEVICE_NAME}")
         raise Exception(f"Dispositivo {DEVICE_NAME} no encontrado")
     print(f"Dispositivo encontrado: {device.address}")
+    
+    last_accepted_minute = -1
+    
     async with BleakClient(device) as client:
         print(f"✓ Conectado exitosamente a {DEVICE_NAME}")
-        print("⏳ Esperando datos del Arduino (cada 10 minutos)...")
+        print("⏳ Esperando minutos válidos (xx:00, xx:10, xx:20, xx:30, xx:40, xx:50)...")
         def notification_handler(sender, data):
+            nonlocal last_accepted_minute
             try:
                 line = data.decode("utf-8").strip()
                 if line and line.startswith("T:"):
-                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    print(f"WIRELESS [{timestamp}]: {line}")
-                    parsed_data = parse_sensor_data(line)
-                    if parsed_data:
-                        if db_handler:
-                            db_handler.add_sample_to_buffer(source="wireless", temperature=parsed_data["temperature"], humidity=parsed_data["humidity"], pressure=parsed_data["pressure"])
-                        save_to_csv(parsed_data, "wireless", timestamp)
+                    now = datetime.now()
+                    timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+                    current_minute = now.minute
+                    
+                    # Verificar si estamos en un minuto válido
+                    if should_accept_sample() and current_minute != last_accepted_minute:
+                        print(f"📥 WIRELESS [{timestamp}]: {line}")
+                        parsed_data = parse_sensor_data(line)
+                        if parsed_data:
+                            if db_handler:
+                                db_handler.add_sample_to_buffer(source="wireless", temperature=parsed_data["temperature"], humidity=parsed_data["humidity"], pressure=parsed_data["pressure"])
+                            save_to_csv(parsed_data, "wireless", timestamp)
+                            last_accepted_minute = current_minute
+                    else:
+                        print(f"⏭️ WIRELESS [{timestamp}]: Dato ignorado (minuto {current_minute:02d} no válido)")
             except Exception as e:
-                print(f"Error procesando notificacion: {e}")
+                print(f"✗ Error procesando notificacion: {e}")
         await client.start_notify(CHARACTERISTIC_UUID, notification_handler)
         try:
             while True:

@@ -56,38 +56,55 @@ def save_to_csv(data, source, timestamp):
     except Exception as e:
         print(f"✗ Error guardando en CSV: {e}")
 
+def should_accept_sample():
+    """Verifica si estamos en un minuto válido para tomar muestras (10, 20, 30, 40, 50, 00)"""
+    now = datetime.now()
+    minute = now.minute
+    return minute % 10 == 0
+
 def main(db_handler=None):
     """Función principal - Lee datos cuando el Arduino los envía"""
     print(f"🔌 Conectando a puerto serial {SERIAL_PORT}...")
     
+    last_accepted_minute = -1
+    
     try:
         ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
         print(f"✓ Conectado a {SERIAL_PORT}")
-        print("⏳ Esperando datos del Arduino (cada 10 minutos)...")
+        print("⏳ Esperando minutos válidos (xx:00, xx:10, xx:20, xx:30, xx:40, xx:50)...")
         
         while True:
             if ser.in_waiting > 0:
                 line = ser.readline().decode('utf-8').strip()
                 
                 if line and line.startswith('T:'):
-                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    print(f"📥 WIRED [{timestamp}]: {line}")
+                    now = datetime.now()
+                    timestamp = now.strftime('%Y-%m-%d %H:%M:%S')
+                    current_minute = now.minute
                     
-                    # Parsear los datos
-                    data = parse_sensor_data(line)
-                    
-                    if data:
-                        # Agregar al buffer de MongoDB
-                        if db_handler:
-                            db_handler.add_sample_to_buffer(
-                                source='wired',
-                                temperature=data['temperature'],
-                                humidity=data['humidity'],
-                                pressure=data['pressure']
-                            )
+                    # Verificar si estamos en un minuto válido
+                    if should_accept_sample() and current_minute != last_accepted_minute:
+                        print(f"📥 WIRED [{timestamp}]: {line}")
                         
-                        # Guardar en CSV local (opcional)
-                        save_to_csv(data, 'wired', timestamp)
+                        # Parsear los datos
+                        data = parse_sensor_data(line)
+                        
+                        if data:
+                            # Agregar al buffer de MongoDB
+                            if db_handler:
+                                db_handler.add_sample_to_buffer(
+                                    source='wired',
+                                    temperature=data['temperature'],
+                                    humidity=data['humidity'],
+                                    pressure=data['pressure']
+                                )
+                            
+                            # Guardar en CSV local (opcional)
+                            save_to_csv(data, 'wired', timestamp)
+                            
+                            last_accepted_minute = current_minute
+                    else:
+                        print(f"⏭️ WIRED [{timestamp}]: Dato ignorado (minuto {current_minute:02d} no válido)")
                     
     except serial.SerialException as e:
         print(f"✗ Error de conexión serial: {e}")
