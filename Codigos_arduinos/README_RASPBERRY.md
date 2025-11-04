@@ -81,6 +81,12 @@ Codigos_arduinos/
 - El wired envía por Serial
 - El wireless envía por Bluetooth BLE
 
+#### **Identificación por LED:**
+- **WIRED (Serial)**: LED parpadea cada **1 segundo** ⚡
+  - Al enviar datos: 3 parpadeos rápidos
+- **WIRELESS (Bluetooth)**: LED parpadea cada **2 segundos** 💡
+  - Al enviar datos: 2 parpadeos rápidos
+
 ### Python:
 - **Recibe datos** de ambos Arduinos
 - **Guarda en CSV local** cada dato individual

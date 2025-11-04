@@ -6,6 +6,11 @@
 const unsigned long INTERVALO_LECTURA = 600000; // 10 minutos en milisegundos (600,000 ms)
 unsigned long ultimaLectura = 0;
 
+// LED de identificación - Parpadeo rápido (1 segundo)
+const unsigned long INTERVALO_LED = 1000; // 1 segundo
+unsigned long ultimoParpadeoLED = 0;
+bool estadoLED = false;
+
 void setup() {
   Serial.begin(9600);
   while (!Serial);
@@ -52,6 +57,13 @@ void setup() {
 void loop() {
   unsigned long tiempoActual = millis();
   
+  // LED de identificación - Parpadeo cada 1 segundo
+  if (tiempoActual - ultimoParpadeoLED >= INTERVALO_LED) {
+    estadoLED = !estadoLED;
+    digitalWrite(LED_BUILTIN, estadoLED);
+    ultimoParpadeoLED = tiempoActual;
+  }
+  
   // Verificar si han pasado 10 minutos
   if (tiempoActual - ultimaLectura >= INTERVALO_LECTURA) {
     // Leer sensores
@@ -70,12 +82,15 @@ void loop() {
     // Actualizar el tiempo de la última lectura
     ultimaLectura = tiempoActual;
     
-    // Parpadear LED para indicar lectura
-    digitalWrite(LED_BUILTIN, HIGH);
-    delay(100);
-    digitalWrite(LED_BUILTIN, LOW);
+    // Triple parpadeo rápido para indicar envío de datos
+    for (int i = 0; i < 3; i++) {
+      digitalWrite(LED_BUILTIN, HIGH);
+      delay(100);
+      digitalWrite(LED_BUILTIN, LOW);
+      delay(100);
+    }
   }
   
   // Pequeño delay para no saturar el loop
-  delay(100);
+  delay(50);
 }

@@ -7,6 +7,11 @@
 const unsigned long INTERVALO_LECTURA = 600000; // 10 minutos en milisegundos (600,000 ms)
 unsigned long ultimaLectura = 0;
 
+// LED de identificación - Parpadeo lento (2 segundos)
+const unsigned long INTERVALO_LED = 2000; // 2 segundos
+unsigned long ultimoParpadeoLED = 0;
+bool estadoLED = false;
+
 // Servicio BLE personalizado
 BLEService sensorService("19B10000-E8F2-537E-4F6C-D104768A1214");
 
@@ -52,10 +57,16 @@ void setup() {
 
 void loop() {
   BLE.poll();
+  unsigned long tiempoActual = millis();
+  
+  // LED de identificación - Parpadeo cada 2 segundos
+  if (tiempoActual - ultimoParpadeoLED >= INTERVALO_LED) {
+    estadoLED = !estadoLED;
+    digitalWrite(LED_BUILTIN, estadoLED);
+    ultimoParpadeoLED = tiempoActual;
+  }
 
   if (BLE.connected()) {
-    unsigned long tiempoActual = millis();
-    
     // Verificar si han pasado 10 minutos
     if (tiempoActual - ultimaLectura >= INTERVALO_LECTURA) {
       // Leer sensores
@@ -77,10 +88,13 @@ void loop() {
       // Actualizar el tiempo de la última lectura
       ultimaLectura = tiempoActual;
       
-      // Parpadear LED para indicar lectura
-      digitalWrite(LED_BUILTIN, HIGH);
-      delay(100);
-      digitalWrite(LED_BUILTIN, LOW);
+      // Doble parpadeo rápido para indicar envío de datos
+      for (int i = 0; i < 2; i++) {
+        digitalWrite(LED_BUILTIN, HIGH);
+        delay(150);
+        digitalWrite(LED_BUILTIN, LOW);
+        delay(150);
+      }
     }
   } else {
     // Si no hay conexión, reanudar advertising
@@ -88,5 +102,5 @@ void loop() {
   }
   
   // Pequeño delay para no saturar el loop
-  delay(100);
+  delay(50);
 }
