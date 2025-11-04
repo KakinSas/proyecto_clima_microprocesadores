@@ -63,7 +63,17 @@ async def main(db_handler=None):
             while True:
                 await asyncio.sleep(1)
         except KeyboardInterrupt:
-            await client.stop_notify(CHARACTERISTIC_UUID)
+            print("⏹️ Interrupción detectada - Cerrando conexión Bluetooth...")
+        except Exception as e:
+            print(f"✗ Error inesperado: {e} - Cerrando conexión Bluetooth...")
+        finally:
+            # Garantizar desconexión limpia sin importar qué pase
+            try:
+                await client.stop_notify(CHARACTERISTIC_UUID)
+                print("✓ Notificaciones detenidas")
+            except:
+                pass
+            print("✓ Desconexión Bluetooth asegurada (async with context manager)")
 
 if __name__ == "__main__":
     asyncio.run(main())
