@@ -43,8 +43,8 @@ async def main(db_handler=None):
         raise Exception(f"Dispositivo {DEVICE_NAME} no encontrado")
     print(f"Dispositivo encontrado: {device.address}")
     async with BleakClient(device) as client:
-        print(f"Conectado a {DEVICE_NAME}")
-        print("Esperando datos del Arduino (cada 10 minutos)...")
+        print(f"✓ Conectado exitosamente a {DEVICE_NAME}")
+        print("⏳ Esperando datos del Arduino (cada 10 minutos)...")
         def notification_handler(sender, data):
             try:
                 line = data.decode("utf-8").strip()
@@ -63,17 +63,7 @@ async def main(db_handler=None):
             while True:
                 await asyncio.sleep(1)
         except KeyboardInterrupt:
-            print("⏹️ Interrupción detectada - Cerrando conexión Bluetooth...")
-        except Exception as e:
-            print(f"✗ Error inesperado: {e} - Cerrando conexión Bluetooth...")
-        finally:
-            # Garantizar desconexión limpia sin importar qué pase
-            try:
-                await client.stop_notify(CHARACTERISTIC_UUID)
-                print("✓ Notificaciones detenidas")
-            except:
-                pass
-            print("✓ Desconexión Bluetooth asegurada (async with context manager)")
+            await client.stop_notify(CHARACTERISTIC_UUID)
 
 if __name__ == "__main__":
     asyncio.run(main())
