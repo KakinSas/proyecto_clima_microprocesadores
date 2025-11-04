@@ -13,15 +13,32 @@ class SensorBuffer:
         self.start_time = None
         self.source_name = source_name
         self.expected_interval = timedelta(minutes=10)
-        self.hour_timeout = timedelta(hours=1, minutes=5)  # 1 hora + 5 min de tolerancia
+        self.current_hour = None  # Hora actual del buffer (ej: 15 para las 15:xx)
+        self.last_check_time = datetime.now()
     
     def add_sample(self, temperature, humidity, pressure):
         """Agrega una muestra al buffer y retorna si necesita procesar"""
         with self.lock:
             current_time = datetime.now()
             
-            if self.start_time is None:
+            # Si es una nueva hora del reloj, forzar procesamiento del buffer anterior
+            if self.current_hour is not None and current_time.hour != self.current_hour:
+                print(f"⏰ [{self.source_name.upper()}] Nueva hora detectada ({self.current_hour}:xx → {current_time.hour}:xx)")
+                if len(self.buffer) > 0:
+                    # Marcar que necesita procesamiento inmediato
+                    return {
+                        'count': len(self.buffer),
+                        'needs_processing': True,
+                        'force_process': True,
+                        'reason': 'hour_change',
+                        'time_elapsed': current_time - self.start_time if self.start_time else timedelta(0)
+                    }
+            
+            # Inicializar hora actual si es la primera muestra
+            if self.current_hour is None:
+                self.current_hour = current_time.hour
                 self.start_time = current_time
+                print(f"🕐 [{self.source_name.upper()}] Iniciando buffer para hora {self.current_hour}:00")
             
             sample = {
                 'temperature': temperature,
@@ -30,25 +47,27 @@ class SensorBuffer:
                 'timestamp': current_time
             }
             self.buffer.append(sample)
-            print(f"📊 [{self.source_name.upper()}] Buffer: {len(self.buffer)}/{self.max_samples} muestras")
+            print(f"📊 [{self.source_name.upper()}] Buffer: {len(self.buffer)}/{self.max_samples} muestras (hora {self.current_hour}:xx)")
             
             return {
                 'count': len(self.buffer),
                 'needs_processing': len(self.buffer) >= self.max_samples,
+                'force_process': False,
                 'time_elapsed': current_time - self.start_time
             }
     
     def check_timeout(self):
-        """Verifica si ha pasado demasiado tiempo sin completar el buffer"""
+        """Verifica si cambió la hora del reloj y el buffer no se procesó"""
         with self.lock:
-            if self.start_time is None or len(self.buffer) == 0:
+            current_time = datetime.now()
+            
+            if self.current_hour is None or len(self.buffer) == 0:
                 return False
             
-            elapsed = datetime.now() - self.start_time
-            
-            # Si pasó más de 1 hora sin completar el buffer
-            if elapsed > self.hour_timeout:
-                print(f"⚠️ [{self.source_name.upper()}] TIMEOUT: {elapsed.total_seconds()/60:.1f} min sin completar buffer")
+            # Si cambió la hora del reloj y hay datos sin procesar
+            if current_time.hour != self.current_hour:
+                print(f"⏰ [{self.source_name.upper()}] TIMEOUT: Cambio de hora detectado ({self.current_hour}:xx → {current_time.hour}:xx)")
+                print(f"   📉 Buffer incompleto con {len(self.buffer)} muestras")
                 return True
             
             return False
@@ -137,16 +156,16 @@ class SensorBuffer:
             return result
     
     def clear(self):
-        """Limpia el buffer y mantiene la última muestra como primera de la siguiente hora"""
+        """Limpia el buffer para la siguiente hora"""
         with self.lock:
-            if len(self.buffer) > 0:
-                last_sample = self.buffer[-1]
-                self.buffer = [last_sample]
-                self.start_time = datetime.now()
-                print("🔄 Buffer reiniciado, última muestra guardada como primera")
-            else:
-                self.buffer = []
-                self.start_time = None
+            current_time = datetime.now()
+            
+            # Limpiar buffer completamente
+            self.buffer = []
+            self.start_time = current_time
+            self.current_hour = current_time.hour
+            
+            print(f"🔄 [{self.source_name.upper()}] Buffer limpiado, iniciando nueva hora {self.current_hour}:xx")
 
 
 class MongoDBHandler:
@@ -174,17 +193,41 @@ class MongoDBHandler:
         self.connect()
     
     def connect(self):
-        """Establece conexión con MongoDB"""
-        try:
-            self.client = MongoClient(self.uri, serverSelectionTimeoutMS=5000)
-            self.db = self.client[self.database_name]
-            self.collection = self.db[self.collection_name]
-            self.client.server_info()
-            print("✓ Conexión exitosa a MongoDB")
-            return True
-        except Exception as e:
-            print(f"✗ Error conectando a MongoDB: {e}")
-            return False
+        """Establece conexión con MongoDB con reintentos"""
+        max_retries = 3
+        retry_delay = 2  # segundos
+        
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    print(f"🔄 Reintentando conexión a MongoDB (intento {attempt + 1}/{max_retries})...")
+                
+                # Timeout más largo para Raspberry Pi (30 segundos)
+                self.client = MongoClient(
+                    self.uri, 
+                    serverSelectionTimeoutMS=30000,
+                    connectTimeoutMS=30000,
+                    socketTimeoutMS=30000
+                )
+                self.db = self.client[self.database_name]
+                self.collection = self.db[self.collection_name]
+                
+                # Verificar conexión
+                self.client.server_info()
+                print("✓ Conexión exitosa a MongoDB")
+                return True
+                
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"⚠️ Error en intento {attempt + 1}: {e}")
+                    import time
+                    time.sleep(retry_delay)
+                else:
+                    print(f"✗ Error conectando a MongoDB después de {max_retries} intentos: {e}")
+                    print("⚠️ El sistema continuará funcionando sin MongoDB (solo guardado local en CSV)")
+                    return False
+        
+        return False
     
     def _monitor_timeouts(self):
         """Monitorea los buffers y procesa si hay timeout (más de 1 hora sin completar)"""
@@ -214,6 +257,14 @@ class MongoDBHandler:
         buffer = self.buffers[source]
         info = buffer.add_sample(temperature, humidity, pressure)
         
+        # Si cambió la hora, procesar buffer anterior primero
+        if info.get('force_process') and info.get('reason') == 'hour_change':
+            print(f"⚡ [{source.upper()}] Procesando buffer de hora anterior antes de agregar nuevo dato")
+            self.upload_hourly_average(source, force=True)
+            # Ahora agregar el dato nuevo al buffer limpio
+            buffer.add_sample(temperature, humidity, pressure)
+            return
+        
         # Si el buffer está lleno (6 muestras), calcular promedio y subir
         if info['needs_processing']:
             self.upload_hourly_average(source)
@@ -230,6 +281,12 @@ class MongoDBHandler:
         avg_data = buffer.calculate_average(force=force)
         
         if avg_data is None:
+            return
+        
+        # Si MongoDB no está conectado, solo reportar y limpiar buffer
+        if self.client is None:
+            print(f"⚠️ [{source.upper()}] MongoDB no disponible - Datos solo guardados en CSV local")
+            buffer.clear()
             return
         
         # Caso de fallo: datos insuficientes

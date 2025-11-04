@@ -84,10 +84,11 @@ Codigos_arduinos/
 ### Python:
 - **Recibe datos** de ambos Arduinos
 - **Guarda en CSV local** cada dato individual
-- **Buffer en memoria**: Acumula 6 muestras (1 hora)
+- **Buffer sincronizado por hora**: Acumula datos durante cada hora del reloj (15:00-15:59, 16:00-16:59, etc.)
+- **Procesamiento automático al cambio de hora**: Al llegar a las 16:00, procesa datos de las 15:xx automáticamente
 - **Promedio horario**: Calcula promedio y sube a MongoDB
 - **Interpolación**: Si faltan datos (5 en vez de 6), interpola linealmente
-- **Detección de fallos**: Si pasa >1 hora sin completar buffer, marca como N/A
+- **Detección de fallos**: Si hay <5 datos al cambiar la hora, marca como N/A
 
 ### MongoDB:
 - **Promedios horarios** con status OK o FAILURE
@@ -137,7 +138,15 @@ sudo hcitool lescan
 # Verificar conexión a internet
 ping google.com
 
-# El programa seguirá funcionando y guardando en CSV local
+# Verificar que dnspython esté instalado
+pip3 list | grep dnspython
+
+# Si no está instalado:
+pip3 install --user dnspython
+
+# El sistema hará 3 intentos con timeout de 30 segundos
+# Si falla, continuará funcionando y guardando solo en CSV local
+# Verás: "⚠️ El sistema continuará funcionando sin MongoDB"
 ```
 
 ## 10. Configuración Automática al Inicio
