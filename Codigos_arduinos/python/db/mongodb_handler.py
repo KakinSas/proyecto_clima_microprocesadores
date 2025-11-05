@@ -73,55 +73,61 @@ class SensorBuffer:
             return False
     
     def interpolate_missing_sample(self):
-        """Interpola linealmente si falta 1 muestra (5 en vez de 6)"""
-        with self.lock:
-            if len(self.buffer) != 5:
-                return False
-            
-            print("[WARN] Solo 5 muestras detectadas, aplicando interpolación lineal...")
-            
-            # Ordenar por timestamp
-            self.buffer.sort(key=lambda x: x['timestamp'])
-            
-            # Encontrar el hueco más grande entre timestamps consecutivos
-            max_gap_index = 0
-            max_gap = timedelta(0)
-            
-            for i in range(len(self.buffer) - 1):
-                gap = self.buffer[i + 1]['timestamp'] - self.buffer[i]['timestamp']
-                if gap > max_gap:
-                    max_gap = gap
-                    max_gap_index = i
-            
-            # Interpolar entre las dos muestras con mayor hueco
-            sample_before = self.buffer[max_gap_index]
-            sample_after = self.buffer[max_gap_index + 1]
-            
-            interpolated_sample = {
-                'temperature': (sample_before['temperature'] + sample_after['temperature']) / 2,
-                'humidity': (sample_before['humidity'] + sample_after['humidity']) / 2,
-                'pressure': (sample_before['pressure'] + sample_after['pressure']) / 2,
-                'timestamp': sample_before['timestamp'] + (sample_after['timestamp'] - sample_before['timestamp']) / 2,
-                'interpolated': True
-            }
-            
-            # Insertar la muestra interpolada
-            self.buffer.insert(max_gap_index + 1, interpolated_sample)
-            
-            print(f"[SUCCESS] Muestra interpolada insertada: T={interpolated_sample['temperature']:.2f}°C, "
-                      f"H={interpolated_sample['humidity']:.2f}%, P={interpolated_sample['pressure']:.2f}hPa")
-            
-            return True
+        """Interpola linealmente si falta 1 muestra (5 en vez de 6)
+        IMPORTANTE: Esta función DEBE llamarse desde dentro de un 'with self.lock:' existente
+        """
+        if len(self.buffer) != 5:
+            return False
+        
+        print(f"[WARN] [{self.source_name.upper()}] Solo 5 muestras detectadas, aplicando interpolación lineal...")
+        
+        # Ordenar por timestamp
+        self.buffer.sort(key=lambda x: x['timestamp'])
+        
+        # Encontrar el hueco más grande entre timestamps consecutivos
+        max_gap_index = 0
+        max_gap = timedelta(0)
+        
+        for i in range(len(self.buffer) - 1):
+            gap = self.buffer[i + 1]['timestamp'] - self.buffer[i]['timestamp']
+            if gap > max_gap:
+                max_gap = gap
+                max_gap_index = i
+        
+        # Interpolar entre las dos muestras con mayor hueco
+        sample_before = self.buffer[max_gap_index]
+        sample_after = self.buffer[max_gap_index + 1]
+        
+        interpolated_sample = {
+            'temperature': (sample_before['temperature'] + sample_after['temperature']) / 2,
+            'humidity': (sample_before['humidity'] + sample_after['humidity']) / 2,
+            'pressure': (sample_before['pressure'] + sample_after['pressure']) / 2,
+            'timestamp': sample_before['timestamp'] + (sample_after['timestamp'] - sample_before['timestamp']) / 2,
+            'interpolated': True
+        }
+        
+        # Insertar la muestra interpolada
+        self.buffer.insert(max_gap_index + 1, interpolated_sample)
+        
+        print(f"[SUCCESS] Muestra interpolada insertada: T={interpolated_sample['temperature']:.2f}°C, "
+                  f"H={interpolated_sample['humidity']:.2f}%, P={interpolated_sample['pressure']:.2f}hPa")
+        
+        return True
     
     def calculate_average(self, force=False):
         """Calcula el promedio de las muestras del buffer"""
         with self.lock:
             if len(self.buffer) == 0:
+                print(f"[DEBUG] [{self.source_name.upper()}] Buffer vacío - Retornando None")
                 return None
+            
+            print(f"[DEBUG] [{self.source_name.upper()}] Buffer tiene {len(self.buffer)} muestras antes de procesar")
             
             # Si hay 5 muestras, interpolar primero
             if len(self.buffer) == 5:
+                print(f"[DEBUG] [{self.source_name.upper()}] Llamando interpolate_missing_sample()...")
                 self.interpolate_missing_sample()
+                print(f"[DEBUG] [{self.source_name.upper()}] Después de interpolación: {len(self.buffer)} muestras")
             
             # Si aún no hay 6 muestras (menos de 5)
             if len(self.buffer) < 5:
@@ -133,6 +139,7 @@ class SensorBuffer:
                     print(f"[WARN] [{self.source_name.upper()}] Insuficientes muestras ({len(self.buffer)}/{self.max_samples})")
                     return None
             
+            print(f"[DEBUG] [{self.source_name.upper()}] Calculando promedios con numpy...")
             avg_temp = np.mean([s['temperature'] for s in self.buffer])
             avg_humidity = np.mean([s['humidity'] for s in self.buffer])
             avg_pressure = np.mean([s['pressure'] for s in self.buffer])
@@ -148,7 +155,7 @@ class SensorBuffer:
             }
             
             print(f"[INFO] [{self.source_name.upper()}] Promedio calculado: T={result['temperature']}°C, "
-                      f"H={result['humidity']}%, P={result['pressure']}hPa")
+                      f"H={result['humidity']}%, P={result['pressure']}hPa (interpolado={result['interpolated']})")
             
             return result
     
@@ -302,9 +309,11 @@ class MongoDBHandler:
         
         # Verificar si ya existe un registro para esta hora y fuente
         hour_to_check = buffer.start_time.replace(minute=0, second=0, microsecond=0) if buffer.start_time else datetime.now().replace(minute=0, second=0, microsecond=0)
+        print(f"[DEBUG] [{source.upper()}] Buscando duplicados para hora {hour_to_check.strftime('%Y-%m-%d %H:00:00')}")
         
         try:
             # Agregar timeout a la consulta para evitar bloqueos
+            print(f"[DEBUG] [{source.upper()}] Ejecutando find_one() en MongoDB...")
             existing = self.collection.find_one(
                 {
                     'source': source,
@@ -315,16 +324,18 @@ class MongoDBHandler:
                 },
                 max_time_ms=5000  # Timeout de 5 segundos
             )
+            print(f"[DEBUG] [{source.upper()}] find_one() completado. Resultado: {'DUPLICADO' if existing else 'NUEVO'}")
             
             if existing:
                 print(f"[SKIP] [{source.upper()}] Registro ya existe para hora {hour_to_check.strftime('%H:00')} - Omitiendo inserción")
                 buffer.clear()
                 return
         except Exception as e:
-            print(f"[WARN] Error verificando duplicados: {e} - Continuando con inserción")
+            print(f"[WARN] [{source.upper()}] Error verificando duplicados: {e} - Continuando con inserción")
         
         # Caso de fallo: datos insuficientes
         if avg_data == 'NA':
+            print(f"[DEBUG] [{source.upper()}] avg_data es 'NA' - Preparando documento de fallo")
             document = {
                 'source': source,
                 'type': 'hourly_average',
@@ -341,6 +352,7 @@ class MongoDBHandler:
             }
             
             try:
+                print(f"[DEBUG] [{source.upper()}] Insertando documento N/A en MongoDB...")
                 result = self.collection.insert_one(document)
                 print(f"[WARN] [{source.upper()}] Hora marcada como N/A por fallo (ID: {result.inserted_id})")
                 print(f"   [WARN] Solo {len(buffer.buffer)} muestras recibidas en la última hora")
@@ -349,11 +361,12 @@ class MongoDBHandler:
                 buffer.clear()
                 
             except Exception as e:
-                print(f"[ERROR] Error subiendo N/A a MongoDB: {e}")
+                print(f"[ERROR] [{source.upper()}] Error subiendo N/A a MongoDB: {e}")
             
             return
         
         # Caso normal: datos completos
+        print(f"[DEBUG] [{source.upper()}] avg_data es válido - Preparando documento normal")
         document = {
             'source': source,
             'type': 'hourly_average',
@@ -368,7 +381,10 @@ class MongoDBHandler:
             'status': 'OK'
         }
         
+        print(f"[DEBUG] [{source.upper()}] Documento preparado: T={document['temperature']}, H={document['humidity']}, P={document['pressure']}, samples={document['samples_count']}, interpolated={document['interpolated']}")
+        
         try:
+            print(f"[DEBUG] [{source.upper()}] Insertando documento en MongoDB...")
             result = self.collection.insert_one(document)
             print(f"[SUCCESS] [{source.upper()}] Promedio horario subido a MongoDB (ID: {result.inserted_id})")
             print(f"   [INFO] T={avg_data['temperature']}°C, H={avg_data['humidity']}%, P={avg_data['pressure']}hPa")
