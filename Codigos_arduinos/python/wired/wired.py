@@ -30,7 +30,7 @@ def parse_sensor_data(line):
             'pressure': data.get('P', 0)
         }
     except Exception as e:
-        print(f"✗ Error parseando datos: {e}")
+        print(f"ERROR: Error parseando datos: {e}")
         return None
 
 def save_to_csv(data, source, timestamp):
@@ -54,7 +54,7 @@ def save_to_csv(data, source, timestamp):
                 data['pressure']
             ])
     except Exception as e:
-        print(f"✗ Error guardando en CSV: {e}")
+        print(f"ERROR: Error guardando en CSV: {e}")
 
 def should_accept_sample():
     """Verifica si estamos en un minuto válido para tomar muestras (10, 20, 30, 40, 50, 00)"""
@@ -64,14 +64,14 @@ def should_accept_sample():
 
 def main(db_handler=None):
     """Función principal - Lee datos cuando el Arduino los envía"""
-    print(f"🔌 Conectando a puerto serial {SERIAL_PORT}...")
+    print(f"Conectando a puerto serial {SERIAL_PORT}...")
     
     last_accepted_minute = -1
     
     try:
         ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-        print(f"✓ Conectado a {SERIAL_PORT}")
-        print("⏳ Esperando minutos válidos (xx:00, xx:10, xx:20, xx:30, xx:40, xx:50)...")
+        print(f"Conectado a {SERIAL_PORT}")
+        print("Esperando minutos válidos (xx:00, xx:10, xx:20, xx:30, xx:40, xx:50)...")
         
         while True:
             if ser.in_waiting > 0:
@@ -84,7 +84,7 @@ def main(db_handler=None):
                     
                     # Verificar si estamos en un minuto válido
                     if should_accept_sample() and current_minute != last_accepted_minute:
-                        print(f"📥 WIRED [{timestamp}]: {line}")
+                        print(f"WIRED [{timestamp}]: {line}")
                         
                         # Parsear los datos
                         data = parse_sensor_data(line)
@@ -106,15 +106,15 @@ def main(db_handler=None):
                     # Datos en minutos no válidos se ignoran silenciosamente
                     
     except serial.SerialException as e:
-        print(f"✗ Error de conexión serial: {e}")
+        print(f"ERROR: Error de conexión serial: {e}")
         raise
     except Exception as e:
-        print(f"✗ Error inesperado: {e}")
+        print(f"ERROR: Error inesperado: {e}")
         raise
     finally:
         if 'ser' in locals() and ser.is_open:
             ser.close()
-            print("✓ Puerto serial cerrado")
+            print("Puerto serial cerrado")
 
 if __name__ == "__main__":
     main()

@@ -23,7 +23,7 @@ class SensorBuffer:
             
             # Si es una nueva hora del reloj, forzar procesamiento del buffer anterior
             if self.current_hour is not None and current_time.hour != self.current_hour:
-                print(f"[INFO] [{self.source_name.upper()}] Nueva hora detectada ({self.current_hour}:xx -> {current_time.hour}:xx)")
+                print(f"⏰ [{self.source_name.upper()}] Nueva hora detectada ({self.current_hour}:xx → {current_time.hour}:xx)")
                 if len(self.buffer) > 0:
                     # Marcar que necesita procesamiento inmediato
                     return {
@@ -38,7 +38,7 @@ class SensorBuffer:
             if self.current_hour is None:
                 self.current_hour = current_time.hour
                 self.start_time = current_time
-                print(f"[INFO] [{self.source_name.upper()}] Iniciando buffer para hora {self.current_hour}:00")
+                print(f"🕐 [{self.source_name.upper()}] Iniciando buffer para hora {self.current_hour}:00")
             
             sample = {
                 'temperature': temperature,
@@ -47,7 +47,7 @@ class SensorBuffer:
                 'timestamp': current_time
             }
             self.buffer.append(sample)
-            print(f"[INFO] [{self.source_name.upper()}] Buffer: {len(self.buffer)}/{self.max_samples} muestras (hora {self.current_hour}:xx)")
+            print(f"📊 [{self.source_name.upper()}] Buffer: {len(self.buffer)}/{self.max_samples} muestras (hora {self.current_hour}:xx)")
             
             return {
                 'count': len(self.buffer),
@@ -66,8 +66,8 @@ class SensorBuffer:
             
             # Si cambió la hora del reloj y hay datos sin procesar
             if current_time.hour != self.current_hour:
-                print(f"[TIMEOUT] [{self.source_name.upper()}] TIMEOUT: Cambio de hora detectado ({self.current_hour}:xx -> {current_time.hour}:xx)")
-                print(f"   [WARN] Buffer incompleto con {len(self.buffer)} muestras")
+                print(f"⏰ [{self.source_name.upper()}] TIMEOUT: Cambio de hora detectado ({self.current_hour}:xx → {current_time.hour}:xx)")
+                print(f"   📉 Buffer incompleto con {len(self.buffer)} muestras")
                 return True
             
             return False
@@ -78,10 +78,13 @@ class SensorBuffer:
             if len(self.buffer) != 5:
                 return False
             
-            print("[WARN] Solo 5 muestras detectadas, aplicando interpolación lineal...")
+            print("⚠️ Solo 5 muestras detectadas, aplicando interpolación lineal...")
             
             # Ordenar por timestamp
             self.buffer.sort(key=lambda x: x['timestamp'])
+            
+            # Calcular el intervalo esperado (10 minutos)
+            expected_interval = timedelta(minutes=10)
             
             # Encontrar el hueco más grande entre timestamps consecutivos
             max_gap_index = 0
@@ -108,8 +111,8 @@ class SensorBuffer:
             # Insertar la muestra interpolada
             self.buffer.insert(max_gap_index + 1, interpolated_sample)
             
-            print(f"[SUCCESS] Muestra interpolada insertada: T={interpolated_sample['temperature']:.2f}°C, "
-                      f"H={interpolated_sample['humidity']:.2f}%, P={interpolated_sample['pressure']:.2f}hPa")
+            print(f"✓ Muestra interpolada insertada: T={interpolated_sample['temperature']:.2f}°C, "
+                  f"H={interpolated_sample['humidity']:.2f}%, P={interpolated_sample['pressure']:.2f}hPa")
             
             return True
     
@@ -127,10 +130,10 @@ class SensorBuffer:
             if len(self.buffer) < 5:
                 if force:
                     # Caso de fallo: marcar como N/A
-                    print(f"[WARN] [{self.source_name.upper()}] Solo {len(self.buffer)} muestras - Marcando hora como N/A por fallo")
+                    print(f"⚠️ [{self.source_name.upper()}] Solo {len(self.buffer)} muestras - Marcando hora como N/A por fallo")
                     return 'NA'
                 else:
-                    print(f"[WARN] [{self.source_name.upper()}] Insuficientes muestras ({len(self.buffer)}/{self.max_samples})")
+                    print(f"⚠️ [{self.source_name.upper()}] Insuficientes muestras ({len(self.buffer)}/6)")
                     return None
             
             avg_temp = np.mean([s['temperature'] for s in self.buffer])
@@ -147,8 +150,8 @@ class SensorBuffer:
                 'interpolated': any(s.get('interpolated', False) for s in self.buffer)
             }
             
-            print(f"[INFO] [{self.source_name.upper()}] Promedio calculado: T={result['temperature']}°C, "
-                      f"H={result['humidity']}%, P={result['pressure']}hPa")
+            print(f"📈 [{self.source_name.upper()}] Promedio calculado: T={result['temperature']}°C, "
+                  f"H={result['humidity']}%, P={result['pressure']}hPa")
             
             return result
     
@@ -162,7 +165,7 @@ class SensorBuffer:
             self.start_time = current_time
             self.current_hour = current_time.hour
             
-            print(f"[INFO] [{self.source_name.upper()}] Buffer limpiado, iniciando nueva hora {self.current_hour}:xx")
+            print(f"🔄 [{self.source_name.upper()}] Buffer limpiado, iniciando nueva hora {self.current_hour}:xx")
 
 
 class MongoDBHandler:
@@ -197,7 +200,7 @@ class MongoDBHandler:
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
-                    print(f"[INFO] Reintentando conexión a MongoDB (intento {attempt + 1}/{max_retries})...")
+                    print(f"🔄 Reintentando conexión a MongoDB (intento {attempt + 1}/{max_retries})...")
                 
                 # Timeout más largo para Raspberry Pi (30 segundos)
                 self.client = MongoClient(
@@ -211,17 +214,17 @@ class MongoDBHandler:
                 
                 # Verificar conexión
                 self.client.server_info()
-                print("[SUCCESS] Conexión exitosa a MongoDB")
+                print("✓ Conexión exitosa a MongoDB")
                 return True
                 
             except Exception as e:
                 if attempt < max_retries - 1:
-                    print(f"[ERROR] Error en intento {attempt + 1}: {e}")
+                    print(f"⚠️ Error en intento {attempt + 1}: {e}")
                     import time
                     time.sleep(retry_delay)
                 else:
-                    print(f"[FATAL] Error conectando a MongoDB después de {max_retries} intentos: {e}")
-                    print("[WARN] El sistema continuará funcionando sin MongoDB (solo guardado local en CSV)")
+                    print(f"✗ Error conectando a MongoDB después de {max_retries} intentos: {e}")
+                    print("⚠️ El sistema continuará funcionando sin MongoDB (solo guardado local en CSV)")
                     return False
         
         return False
@@ -248,7 +251,7 @@ class MongoDBHandler:
             pressure: Presión en hPa
         """
         if source not in self.buffers:
-            print(f"[ERROR] Fuente desconocida: {source}")
+            print(f"✗ Fuente desconocida: {source}")
             return
         
         buffer = self.buffers[source]
@@ -256,16 +259,9 @@ class MongoDBHandler:
         
         # Si cambió la hora, procesar buffer anterior primero
         if info.get('force_process') and info.get('reason') == 'hour_change':
-            print(f"[INFO] [{source.upper()}] Procesando buffer de hora anterior antes de agregar nuevo dato")
-            try:
-                self.upload_hourly_average(source, force=True)
-            except Exception as e:
-                print(f"[ERROR] ERROR procesando buffer de hora anterior: {e}")
-                # Limpiar buffer forzosamente para evitar quedarse atascado
-                buffer.clear()
-            
+            print(f"⚡ [{source.upper()}] Procesando buffer de hora anterior antes de agregar nuevo dato")
+            self.upload_hourly_average(source, force=True)
             # Ahora agregar el dato nuevo al buffer limpio
-            print(f"[INFO] [{source.upper()}] Agregando muestra nueva a buffer de hora {datetime.now().hour}:xx")
             buffer.add_sample(temperature, humidity, pressure)
             return
         
@@ -281,47 +277,36 @@ class MongoDBHandler:
             source: 'wired' o 'wireless'
             force: Si es True, fuerza el procesamiento aunque no esté completo
         """
-        print(f"[DEBUG] [{source.upper()}] Iniciando upload_hourly_average (force={force})")
-        
         buffer = self.buffers[source]
-        
-        print(f"[DEBUG] [{source.upper()}] Calculando promedio del buffer...")
         avg_data = buffer.calculate_average(force=force)
         
         if avg_data is None:
-            print(f"[WARN] [{source.upper()}] calculate_average retornó None - No hay datos suficientes")
             return
         
         # Si MongoDB no está conectado, solo reportar y limpiar buffer
         if self.client is None:
-            print(f"[WARN] [{source.upper()}] MongoDB no disponible - Datos solo guardados en CSV local")
+            print(f"⚠️ [{source.upper()}] MongoDB no disponible - Datos solo guardados en CSV local")
             buffer.clear()
             return
-        
-        print(f"[DEBUG] [{source.upper()}] Verificando duplicados en MongoDB...")
         
         # Verificar si ya existe un registro para esta hora y fuente
         hour_to_check = buffer.start_time.replace(minute=0, second=0, microsecond=0) if buffer.start_time else datetime.now().replace(minute=0, second=0, microsecond=0)
         
         try:
-            # Agregar timeout a la consulta para evitar bloqueos
-            existing = self.collection.find_one(
-                {
-                    'source': source,
-                    'start_time': {
-                        '$gte': hour_to_check,
-                        '$lt': hour_to_check + timedelta(hours=1)
-                    }
-                },
-                max_time_ms=5000  # Timeout de 5 segundos
-            )
+            existing = self.collection.find_one({
+                'source': source,
+                'start_time': {
+                    '$gte': hour_to_check,
+                    '$lt': hour_to_check + timedelta(hours=1)
+                }
+            })
             
             if existing:
-                print(f"[SKIP] [{source.upper()}] Registro ya existe para hora {hour_to_check.strftime('%H:00')} - Omitiendo inserción")
+                print(f"⏭️ [{source.upper()}] Registro ya existe para hora {hour_to_check.strftime('%H:00')} - Omitiendo inserción")
                 buffer.clear()
                 return
         except Exception as e:
-            print(f"[WARN] Error verificando duplicados: {e} - Continuando con inserción")
+            print(f"⚠️ Error verificando duplicados: {e}")
         
         # Caso de fallo: datos insuficientes
         if avg_data == 'NA':
@@ -342,14 +327,14 @@ class MongoDBHandler:
             
             try:
                 result = self.collection.insert_one(document)
-                print(f"[WARN] [{source.upper()}] Hora marcada como N/A por fallo (ID: {result.inserted_id})")
-                print(f"   [WARN] Solo {len(buffer.buffer)} muestras recibidas en la última hora")
+                print(f"⚠️ [{source.upper()}] Hora marcada como N/A por fallo (ID: {result.inserted_id})")
+                print(f"   📉 Solo {len(buffer.buffer)} muestras recibidas en la última hora")
                 
                 # Limpiar buffer después de subir
                 buffer.clear()
                 
             except Exception as e:
-                print(f"[ERROR] Error subiendo N/A a MongoDB: {e}")
+                print(f"✗ Error subiendo N/A a MongoDB: {e}")
             
             return
         
@@ -370,18 +355,18 @@ class MongoDBHandler:
         
         try:
             result = self.collection.insert_one(document)
-            print(f"[SUCCESS] [{source.upper()}] Promedio horario subido a MongoDB (ID: {result.inserted_id})")
-            print(f"   [INFO] T={avg_data['temperature']}°C, H={avg_data['humidity']}%, P={avg_data['pressure']}hPa")
+            print(f"✅ [{source.upper()}] Promedio horario subido a MongoDB (ID: {result.inserted_id})")
+            print(f"   📊 T={avg_data['temperature']}°C, H={avg_data['humidity']}%, P={avg_data['pressure']}hPa")
             
             # Limpiar buffer después de subir
             buffer.clear()
             
         except Exception as e:
-            print(f"[ERROR] Error subiendo promedio a MongoDB: {e}")
+            print(f"✗ Error subiendo promedio a MongoDB: {e}")
     
     def close(self):
         """Cierra la conexión con MongoDB"""
         self.running = False  # Detener el thread de monitoreo
         if self.client:
             self.client.close()
-            print("[SUCCESS] Conexión a MongoDB cerrada")
+            print("✓ Conexión a MongoDB cerrada")

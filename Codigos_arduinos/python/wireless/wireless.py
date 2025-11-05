@@ -49,12 +49,12 @@ async def main(db_handler=None):
     print(f"Buscando dispositivo Bluetooth: {DEVICE_NAME}...")
     device = await BleakScanner.find_device_by_name(DEVICE_NAME, timeout=20.0)
     if not device:
-        print(f"✗ ERROR: No se encontro el dispositivo {DEVICE_NAME}")
+        print(f"ERROR: No se encontro el dispositivo {DEVICE_NAME}")
         raise Exception(f"Dispositivo {DEVICE_NAME} no encontrado")
     
     # Verificar MAC si ya se había conectado antes
     if EXPECTED_MAC and device.address != EXPECTED_MAC:
-        print(f"⚠️ ADVERTENCIA: MAC cambió de {EXPECTED_MAC} a {device.address}")
+        print(f"WARNING: MAC cambió de {EXPECTED_MAC} a {device.address}")
     
     if not EXPECTED_MAC:
         EXPECTED_MAC = device.address
@@ -67,11 +67,11 @@ async def main(db_handler=None):
         async with BleakClient(device, timeout=30.0) as client:
             # Verificar que la conexión está realmente activa
             if not client.is_connected:
-                print(f"✗ ERROR: Conexión BLE falló")
+                print(f"ERROR: Conexión BLE falló")
                 raise Exception("No se pudo establecer conexión BLE")
             
-            print(f"✓ Conectado exitosamente a {DEVICE_NAME} ({device.address})")
-            print("⏳ Esperando minutos válidos (xx:00, xx:10, xx:20, xx:30, xx:40, xx:50)...")
+            print(f"Conectado exitosamente a {DEVICE_NAME} ({device.address})")
+            print("Esperando minutos válidos (xx:00, xx:10, xx:20, xx:30, xx:40, xx:50)...")
             
             def notification_handler(sender, data):
                 nonlocal last_accepted_minute
@@ -84,7 +84,7 @@ async def main(db_handler=None):
                         
                         # Verificar si estamos en un minuto válido
                         if should_accept_sample() and current_minute != last_accepted_minute:
-                            print(f"📥 WIRELESS [{timestamp}]: {line}")
+                            print(f"WIRELESS [{timestamp}]: {line}")
                             parsed_data = parse_sensor_data(line)
                             if parsed_data:
                                 if db_handler:
@@ -93,12 +93,12 @@ async def main(db_handler=None):
                                 last_accepted_minute = current_minute
                         # Datos en minutos no válidos se ignoran silenciosamente
                 except Exception as e:
-                    print(f"✗ ERROR procesando notificacion: {e}")
+                    print(f"ERROR: ERROR procesando notificacion: {e}")
             
             def disconnected_callback(client):
                 nonlocal connection_lost
                 connection_lost = True
-                print(f"✗ ERROR: Conexión BLE perdida inesperadamente")
+                print(f"ERROR: Conexión BLE perdida inesperadamente")
             
             client.set_disconnected_callback(disconnected_callback)
             
@@ -108,7 +108,7 @@ async def main(db_handler=None):
             try:
                 while True:
                     if connection_lost or not client.is_connected:
-                        print(f"✗ ERROR: Conexión BLE interrumpida")
+                        print(f"ERROR: Conexión BLE interrumpida")
                         break
                     await asyncio.sleep(5)
             except KeyboardInterrupt:
@@ -121,10 +121,10 @@ async def main(db_handler=None):
                     pass
                     
     except asyncio.TimeoutError:
-        print(f"✗ ERROR: Timeout conectando a BLE")
+        print(f"ERROR: Timeout conectando a BLE")
         raise
     except Exception as e:
-        print(f"✗ ERROR BLE: {e}")
+        print(f"ERROR BLE: {e}")
         raise
 
 if __name__ == "__main__":
