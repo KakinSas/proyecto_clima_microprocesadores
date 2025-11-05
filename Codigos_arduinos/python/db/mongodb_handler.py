@@ -289,6 +289,25 @@ class MongoDBHandler:
             buffer.clear()
             return
         
+        # Verificar si ya existe un registro para esta hora y fuente
+        hour_to_check = buffer.start_time.replace(minute=0, second=0, microsecond=0) if buffer.start_time else datetime.now().replace(minute=0, second=0, microsecond=0)
+        
+        try:
+            existing = self.collection.find_one({
+                'source': source,
+                'start_time': {
+                    '$gte': hour_to_check,
+                    '$lt': hour_to_check + timedelta(hours=1)
+                }
+            })
+            
+            if existing:
+                print(f"⏭️ [{source.upper()}] Registro ya existe para hora {hour_to_check.strftime('%H:00')} - Omitiendo inserción")
+                buffer.clear()
+                return
+        except Exception as e:
+            print(f"⚠️ Error verificando duplicados: {e}")
+        
         # Caso de fallo: datos insuficientes
         if avg_data == 'NA':
             document = {
