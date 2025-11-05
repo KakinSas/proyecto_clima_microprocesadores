@@ -103,8 +103,7 @@ def main(db_handler=None):
                             save_to_csv(data, 'wired', timestamp)
                             
                             last_accepted_minute = current_minute
-                    else:
-                        print(f"⏭️ WIRED [{timestamp}]: Dato ignorado (minuto {current_minute:02d} no válido)")
+                    # Datos en minutos no válidos se ignoran silenciosamente
                     
     except serial.SerialException as e:
         print(f"✗ Error de conexión serial: {e}")
