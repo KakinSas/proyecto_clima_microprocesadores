@@ -12,7 +12,14 @@ const unsigned long INTERVALO_LED = 2000; // 2 segundos
 unsigned long ultimoParpadeoLED = 0;
 bool estadoLED = false;
 
-// Control de primera conexión
+// Control de parpadeo de envío de datos (sin usar delay)
+unsigned long inicioParpadeoEnvio = 0;
+int contadorParpadeosEnvio = 0;
+bool modoParpadeoEnvio = false;
+bool estadoLEDEnvio = false;
+
+// Control de advertising
+bool advertisingActivo = false;
 
 
 // Servicio BLE personalizado
@@ -62,14 +69,34 @@ void loop() {
   BLE.poll();
   unsigned long tiempoActual = millis();
   
-  // LED de identificación - Parpadeo cada 2 segundos
-  if (tiempoActual - ultimoParpadeoLED >= INTERVALO_LED) {
-    estadoLED = !estadoLED;
-    digitalWrite(LED_BUILTIN, estadoLED);
-    ultimoParpadeoLED = tiempoActual;
+  // Manejo de parpadeo de envío (sin bloquear con delay)
+  if (modoParpadeoEnvio) {
+    if (tiempoActual - inicioParpadeoEnvio >= 100) {
+      inicioParpadeoEnvio = tiempoActual;
+      estadoLEDEnvio = !estadoLEDEnvio;
+      digitalWrite(LED_BUILTIN, estadoLEDEnvio);
+      
+      if (!estadoLEDEnvio) {
+        contadorParpadeosEnvio++;
+        if (contadorParpadeosEnvio >= 2) {
+          modoParpadeoEnvio = false;
+          contadorParpadeosEnvio = 0;
+        }
+      }
+    }
+  } else {
+    // LED de identificación - Parpadeo cada 2 segundos
+    if (tiempoActual - ultimoParpadeoLED >= INTERVALO_LED) {
+      estadoLED = !estadoLED;
+      digitalWrite(LED_BUILTIN, estadoLED);
+      ultimoParpadeoLED = tiempoActual;
+    }
   }
 
   if (BLE.connected()) {
+    // Resetear flag de advertising al conectar
+    advertisingActivo = false;
+    
     // Verificar si ha pasado 1 minuto
     if (tiempoActual - ultimaLectura >= INTERVALO_LECTURA) {
       // Leer sensores
@@ -83,27 +110,32 @@ void loop() {
                      ",P:" + String(presion, 2);
       
       // Enviar por BLE (convertir a bytes)
-      dataChar.writeValue(datos.c_str());
+      bool envioExitoso = dataChar.writeValue(datos.c_str());
       
-      // También por Serial para debug
-      Serial.println(datos);
-      
-      // Actualizar el tiempo de la última lectura
-      ultimaLectura = tiempoActual;
-      
-      // Doble parpadeo rápido para indicar envío de datos
-      for (int i = 0; i < 2; i++) {
+      if (envioExitoso) {
+        // También por Serial para debug
+        Serial.println(datos);
+        
+        // Actualizar el tiempo de la última lectura solo si envío exitoso
+        ultimaLectura = tiempoActual;
+        
+        // Iniciar parpadeo sin bloquear
+        modoParpadeoEnvio = true;
+        inicioParpadeoEnvio = tiempoActual;
+        contadorParpadeosEnvio = 0;
         digitalWrite(LED_BUILTIN, HIGH);
-        delay(150);
-        digitalWrite(LED_BUILTIN, LOW);
-        delay(150);
+      } else {
+        Serial.println("✗ Error enviando datos BLE");
       }
     }
   } else {
-    // Si no hay conexión, reanudar advertising
-    BLE.advertise();
+    // Si no hay conexión, reanudar advertising solo una vez
+    if (!advertisingActivo) {
+      BLE.advertise();
+      advertisingActivo = true;
+    }
   }
   
   // Pequeño delay para no saturar el loop
-  delay(50);
+  delay(10); // Reducido de 50ms a 10ms para mejor respuesta
 }
