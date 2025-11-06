@@ -2,19 +2,23 @@ from pymongo import MongoClient
 from datetime import datetime, timedelta
 import threading
 import numpy as np
+import csv
+import os
+import time
 
 class SensorBuffer:
-    """Maneja el buffer de datos del sensor con interpolación lineal y detección de fallos"""
+    """Maneja el buffer de datos del sensor con interpolación con historial y detección de fallos"""
     
-    def __init__(self, max_samples=6, source_name="unknown"):
+    def __init__(self, max_samples=12, source_name="unknown"):
         self.max_samples = max_samples
         self.buffer = []
         self.lock = threading.Lock()
         self.start_time = None
         self.source_name = source_name
-        self.expected_interval = timedelta(minutes=10)
+        self.expected_interval = timedelta(minutes=5)
         self.current_hour = None  # Hora actual del buffer (ej: 15 para las 15:xx)
         self.last_check_time = datetime.now()
+        self.history = []  # Historial completo para interpolación avanzada
     
     def add_sample(self, temperature, humidity, pressure):
         """Agrega una muestra al buffer y retorna si necesita procesar"""
@@ -72,74 +76,139 @@ class SensorBuffer:
             
             return False
     
-    def interpolate_missing_sample(self):
-        """Interpola linealmente si falta 1 muestra (5 en vez de 6)
+    def load_history_from_csv(self, csv_path):
+        """Carga el historial completo del sensor desde el CSV"""
+        history = []
+        try:
+            if not os.path.exists(csv_path):
+                return history
+            
+            with open(csv_path, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if row['source'] == self.source_name:
+                        history.append({
+                            'temperature': float(row['temperature']),
+                            'humidity': float(row['humidity']),
+                            'pressure': float(row['pressure']),
+                            'timestamp': datetime.strptime(row['timestamp'], '%Y-%m-%d %H:%M:%S')
+                        })
+        except Exception as e:
+            print(f"[WARN] [{self.source_name.upper()}] Error cargando historial CSV: {e}")
+        
+        return history
+    
+    def interpolate_missing_samples(self, csv_path):
+        """Interpola muestras faltantes usando regresión lineal con TODO el historial
         IMPORTANTE: Esta función DEBE llamarse desde dentro de un 'with self.lock:' existente
         """
-        if len(self.buffer) != 5:
+        if len(self.buffer) >= self.max_samples:
+            return True  # Buffer completo, no necesita interpolación
+        
+        missing_count = self.max_samples - len(self.buffer)
+        print(f"[WARN] [{self.source_name.upper()}] Faltan {missing_count} muestras, aplicando interpolación con historial completo...")
+        
+        # Cargar historial desde CSV
+        history = self.load_history_from_csv(csv_path)
+        
+        # Combinar historial con buffer actual
+        all_data = history + self.buffer
+        
+        if len(all_data) < 2:
+            print(f"[ERROR] [{self.source_name.upper()}] Sin historial suficiente para interpolar")
             return False
         
-        print(f"[WARN] [{self.source_name.upper()}] Solo 5 muestras detectadas, aplicando interpolación lineal...")
+        print(f"[INFO] [{self.source_name.upper()}] Usando {len(all_data)} muestras históricas para interpolación")
         
         # Ordenar por timestamp
+        all_data.sort(key=lambda x: x['timestamp'])
         self.buffer.sort(key=lambda x: x['timestamp'])
         
-        # Encontrar el hueco más grande entre timestamps consecutivos
-        max_gap_index = 0
-        max_gap = timedelta(0)
+        # Encontrar timestamps faltantes en el buffer actual
+        if len(self.buffer) == 0:
+            return False
         
-        for i in range(len(self.buffer) - 1):
-            gap = self.buffer[i + 1]['timestamp'] - self.buffer[i]['timestamp']
-            if gap > max_gap:
-                max_gap = gap
-                max_gap_index = i
+        expected_times = []
+        start_hour = self.buffer[0]['timestamp'].replace(minute=0, second=0, microsecond=0)
+        for i in range(12):
+            expected_times.append(start_hour + timedelta(minutes=i*5))
         
-        # Interpolar entre las dos muestras con mayor hueco
-        sample_before = self.buffer[max_gap_index]
-        sample_after = self.buffer[max_gap_index + 1]
+        existing_times = {s['timestamp'].replace(second=0, microsecond=0) for s in self.buffer}
+        missing_times = [t for t in expected_times if t not in existing_times]
         
-        interpolated_sample = {
-            'temperature': (sample_before['temperature'] + sample_after['temperature']) / 2,
-            'humidity': (sample_before['humidity'] + sample_after['humidity']) / 2,
-            'pressure': (sample_before['pressure'] + sample_after['pressure']) / 2,
-            'timestamp': sample_before['timestamp'] + (sample_after['timestamp'] - sample_before['timestamp']) / 2,
-            'interpolated': True
-        }
+        # Preparar datos para regresión lineal
+        timestamps_numeric = np.array([(d['timestamp'] - all_data[0]['timestamp']).total_seconds() for d in all_data])
+        temps = np.array([d['temperature'] for d in all_data])
+        humids = np.array([d['humidity'] for d in all_data])
+        pressures = np.array([d['pressure'] for d in all_data])
         
-        # Insertar la muestra interpolada
-        self.buffer.insert(max_gap_index + 1, interpolated_sample)
+        # Calcular regresión lineal para cada métrica
+        temp_coef = np.polyfit(timestamps_numeric, temps, 1)
+        humid_coef = np.polyfit(timestamps_numeric, humids, 1)
+        pressure_coef = np.polyfit(timestamps_numeric, pressures, 1)
         
-        print(f"[SUCCESS] Muestra interpolada insertada: T={interpolated_sample['temperature']:.2f}°C, "
-                  f"H={interpolated_sample['humidity']:.2f}%, P={interpolated_sample['pressure']:.2f}hPa")
+        # Interpolar valores faltantes
+        interpolated_count = 0
+        for missing_time in missing_times[:missing_count]:
+            time_numeric = (missing_time - all_data[0]['timestamp']).total_seconds()
+            
+            interp_temp = temp_coef[0] * time_numeric + temp_coef[1]
+            interp_humid = humid_coef[0] * time_numeric + humid_coef[1]
+            interp_pressure = pressure_coef[0] * time_numeric + pressure_coef[1]
+            
+            # Validar rangos realistas
+            interp_temp = max(0, min(50, interp_temp))
+            interp_humid = max(0, min(100, interp_humid))
+            interp_pressure = max(900, min(1100, interp_pressure))
+            
+            interpolated_sample = {
+                'temperature': round(interp_temp, 2),
+                'humidity': round(interp_humid, 2),
+                'pressure': round(interp_pressure, 2),
+                'timestamp': missing_time,
+                'interpolated': True
+            }
+            
+            self.buffer.append(interpolated_sample)
+            interpolated_count += 1
+            
+            print(f"[INFO] [{self.source_name.upper()}] Interpolado {missing_time.strftime('%H:%M')}: T={interp_temp:.2f}°C, H={interp_humid:.2f}%, P={interp_pressure:.2f}hPa")
         
+        # Re-ordenar buffer
+        self.buffer.sort(key=lambda x: x['timestamp'])
+        
+        print(f"[SUCCESS] [{self.source_name.upper()}] {interpolated_count} muestras interpoladas exitosamente")
         return True
     
-    def calculate_average(self, force=False):
-        """Calcula el promedio de las muestras del buffer"""
+    def calculate_average(self, force=False, csv_path=None):
+        """Calcula el promedio de las muestras del buffer aplicando regla del 70%"""
         with self.lock:
             if len(self.buffer) == 0:
-                print(f"[DEBUG] [{self.source_name.upper()}] Buffer vacío - Retornando None")
                 return None
             
-            print(f"[DEBUG] [{self.source_name.upper()}] Buffer tiene {len(self.buffer)} muestras antes de procesar")
+            # Regla del 70%: Calcular mínimo requerido (redondeado hacia arriba)
+            min_samples_required = int(np.ceil(self.max_samples * 0.7))
+            current_percentage = (len(self.buffer) / self.max_samples) * 100
             
-            # Si hay 5 muestras, interpolar primero
-            if len(self.buffer) == 5:
-                print(f"[DEBUG] [{self.source_name.upper()}] Llamando interpolate_missing_sample()...")
-                self.interpolate_missing_sample()
-                print(f"[DEBUG] [{self.source_name.upper()}] Después de interpolación: {len(self.buffer)} muestras")
+            print(f"[INFO] [{self.source_name.upper()}] Buffer: {len(self.buffer)}/{self.max_samples} muestras ({current_percentage:.1f}%)")
             
-            # Si aún no hay 6 muestras (menos de 5)
-            if len(self.buffer) < 5:
+            # Si no cumple el 70% mínimo
+            if len(self.buffer) < min_samples_required:
                 if force:
-                    # Caso de fallo: marcar como N/A
-                    print(f"[WARN] [{self.source_name.upper()}] Solo {len(self.buffer)} muestras - Marcando hora como N/A por fallo")
+                    print(f"[ERROR] [{self.source_name.upper()}] Solo {current_percentage:.1f}% de datos - Se requiere mínimo 70%")
+                    print(f"[ERROR] Hora perdida - Marcando como N/A")
                     return 'NA'
                 else:
-                    print(f"[WARN] [{self.source_name.upper()}] Insuficientes muestras ({len(self.buffer)}/{self.max_samples})")
                     return None
             
-            print(f"[DEBUG] [{self.source_name.upper()}] Calculando promedios con numpy...")
+            # Si cumple el 70% pero falta alguna muestra, interpolar
+            if len(self.buffer) < self.max_samples:
+                if csv_path:
+                    self.interpolate_missing_samples(csv_path)
+                else:
+                    print(f"[WARN] [{self.source_name.upper()}] Sin ruta CSV, no se puede interpolar con historial")
+            
+            # Calcular promedios
             avg_temp = np.mean([s['temperature'] for s in self.buffer])
             avg_humidity = np.mean([s['humidity'] for s in self.buffer])
             avg_pressure = np.mean([s['pressure'] for s in self.buffer])
@@ -154,8 +223,7 @@ class SensorBuffer:
                 'interpolated': any(s.get('interpolated', False) for s in self.buffer)
             }
             
-            print(f"[INFO] [{self.source_name.upper()}] Promedio calculado: T={result['temperature']}°C, "
-                      f"H={result['humidity']}%, P={result['pressure']}hPa (interpolado={result['interpolated']})")
+            print(f"[SUCCESS] [{self.source_name.upper()}] Promedio: T={result['temperature']}°C, H={result['humidity']}%, P={result['pressure']}hPa (interpolado={result['interpolated']})")
             
             return result
     
@@ -182,6 +250,11 @@ class MongoDBHandler:
         self.db = None
         self.collection = None
         self.lock = threading.Lock()
+        
+        # Ruta al CSV de datos históricos
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_dir = os.path.join(script_dir, '..', '..')
+        self.csv_path = os.path.join(project_dir, 'data', 'sensor_data.csv')
         
         # Buffers para cada fuente de datos
         self.buffers = {
@@ -288,32 +361,23 @@ class MongoDBHandler:
             source: 'wired' o 'wireless'
             force: Si es True, fuerza el procesamiento aunque no esté completo
         """
-        print(f"[DEBUG] [{source.upper()}] Iniciando upload_hourly_average (force={force})")
-        
         buffer = self.buffers[source]
         
-        print(f"[DEBUG] [{source.upper()}] Calculando promedio del buffer...")
-        avg_data = buffer.calculate_average(force=force)
+        avg_data = buffer.calculate_average(force=force, csv_path=self.csv_path)
         
         if avg_data is None:
-            print(f"[WARN] [{source.upper()}] calculate_average retornó None - No hay datos suficientes")
             return
         
         # Si MongoDB no está conectado, solo reportar y limpiar buffer
         if self.client is None:
-            print(f"[WARN] [{source.upper()}] MongoDB no disponible - Datos solo guardados en CSV local")
+            print(f"[WARN] [{source.upper()}] MongoDB no disponible - Datos guardados en CSV local")
             buffer.clear()
             return
         
-        print(f"[DEBUG] [{source.upper()}] Verificando duplicados en MongoDB...")
-        
         # Verificar si ya existe un registro para esta hora y fuente
         hour_to_check = buffer.start_time.replace(minute=0, second=0, microsecond=0) if buffer.start_time else datetime.now().replace(minute=0, second=0, microsecond=0)
-        print(f"[DEBUG] [{source.upper()}] Buscando duplicados para hora {hour_to_check.strftime('%Y-%m-%d %H:00:00')}")
         
         try:
-            # Agregar timeout a la consulta para evitar bloqueos
-            print(f"[DEBUG] [{source.upper()}] Ejecutando find_one() en MongoDB...")
             existing = self.collection.find_one(
                 {
                     'source': source,
@@ -322,20 +386,18 @@ class MongoDBHandler:
                         '$lt': hour_to_check + timedelta(hours=1)
                     }
                 },
-                max_time_ms=5000  # Timeout de 5 segundos
+                max_time_ms=5000
             )
-            print(f"[DEBUG] [{source.upper()}] find_one() completado. Resultado: {'DUPLICADO' if existing else 'NUEVO'}")
             
             if existing:
-                print(f"[SKIP] [{source.upper()}] Registro ya existe para hora {hour_to_check.strftime('%H:00')} - Omitiendo inserción")
+                print(f"[SKIP] [{source.upper()}] Registro ya existe para hora {hour_to_check.strftime('%H:00')}")
                 buffer.clear()
                 return
         except Exception as e:
-            print(f"[WARN] [{source.upper()}] Error verificando duplicados: {e} - Continuando con inserción")
+            print(f"[WARN] [{source.upper()}] Error verificando duplicados: {e}")
         
         # Caso de fallo: datos insuficientes
         if avg_data == 'NA':
-            print(f"[DEBUG] [{source.upper()}] avg_data es 'NA' - Preparando documento de fallo")
             document = {
                 'source': source,
                 'type': 'hourly_average',
@@ -348,25 +410,19 @@ class MongoDBHandler:
                 'end_time': datetime.now(),
                 'timestamp': datetime.now(),
                 'status': 'FAILURE',
-                'reason': 'Insufficient data - sensor failure or connection lost'
+                'reason': 'Insufficient data (less than 70%)'
             }
             
             try:
-                print(f"[DEBUG] [{source.upper()}] Insertando documento N/A en MongoDB...")
                 result = self.collection.insert_one(document)
-                print(f"[WARN] [{source.upper()}] Hora marcada como N/A por fallo (ID: {result.inserted_id})")
-                print(f"   [WARN] Solo {len(buffer.buffer)} muestras recibidas en la última hora")
-                
-                # Limpiar buffer después de subir
+                print(f"[FAILURE] [{source.upper()}] Hora {hour_to_check.strftime('%H:00')} marcada como N/A (ID: {result.inserted_id})")
                 buffer.clear()
-                
             except Exception as e:
-                print(f"[ERROR] [{source.upper()}] Error subiendo N/A a MongoDB: {e}")
+                print(f"[ERROR] [{source.upper()}] Error subiendo N/A: {e}")
             
             return
         
         # Caso normal: datos completos
-        print(f"[DEBUG] [{source.upper()}] avg_data es válido - Preparando documento normal")
         document = {
             'source': source,
             'type': 'hourly_average',
@@ -381,15 +437,9 @@ class MongoDBHandler:
             'status': 'OK'
         }
         
-        print(f"[DEBUG] [{source.upper()}] Documento preparado: T={document['temperature']}, H={document['humidity']}, P={document['pressure']}, samples={document['samples_count']}, interpolated={document['interpolated']}")
-        
         try:
-            print(f"[DEBUG] [{source.upper()}] Insertando documento en MongoDB...")
             result = self.collection.insert_one(document)
-            print(f"[SUCCESS] [{source.upper()}] Promedio horario subido a MongoDB (ID: {result.inserted_id})")
-            print(f"   [INFO] T={avg_data['temperature']}°C, H={avg_data['humidity']}%, P={avg_data['pressure']}hPa")
-            
-            # Limpiar buffer después de subir
+            print(f"[MONGODB] [{source.upper()}] Subido exitosamente (ID: {result.inserted_id})")
             buffer.clear()
             
         except Exception as e:

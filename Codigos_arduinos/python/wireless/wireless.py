@@ -38,10 +38,10 @@ def save_to_csv(data, source, timestamp):
         print(f"Error guardando en CSV: {e}")
 
 def should_accept_sample():
-    """Verifica si estamos en un minuto válido para tomar muestras (10, 20, 30, 40, 50, 00)"""
+    """Verifica si estamos en un minuto válido para tomar muestras (cada 5 minutos)"""
     now = datetime.now()
     minute = now.minute
-    return minute % 10 == 0
+    return minute % 5 == 0
 
 async def main(db_handler=None):
     global EXPECTED_MAC
@@ -63,15 +63,20 @@ async def main(db_handler=None):
     last_accepted_minute = -1
     connection_lost = False
     
+    def disconnected_callback(client):
+        nonlocal connection_lost
+        connection_lost = True
+        print(f"ERROR: Conexión BLE perdida inesperadamente")
+    
     try:
-        async with BleakClient(device, timeout=30.0) as client:
+        async with BleakClient(device, timeout=30.0, disconnected_callback=disconnected_callback) as client:
             # Verificar que la conexión está realmente activa
             if not client.is_connected:
                 print(f"ERROR: Conexión BLE falló")
                 raise Exception("No se pudo establecer conexión BLE")
             
             print(f"Conectado exitosamente a {DEVICE_NAME} ({device.address})")
-            print("Esperando minutos válidos (xx:00, xx:10, xx:20, xx:30, xx:40, xx:50)...")
+            print("Esperando minutos válidos (xx:00, xx:05, xx:10, ..., xx:55)...")
             
             def notification_handler(sender, data):
                 nonlocal last_accepted_minute
@@ -94,13 +99,6 @@ async def main(db_handler=None):
                         # Datos en minutos no válidos se ignoran silenciosamente
                 except Exception as e:
                     print(f"ERROR: ERROR procesando notificacion: {e}")
-            
-            def disconnected_callback(client):
-                nonlocal connection_lost
-                connection_lost = True
-                print(f"ERROR: Conexión BLE perdida inesperadamente")
-            
-            client.set_disconnected_callback(disconnected_callback)
             
             await client.start_notify(CHARACTERISTIC_UUID, notification_handler)
             

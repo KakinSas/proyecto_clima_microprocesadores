@@ -57,10 +57,10 @@ def save_to_csv(data, source, timestamp):
         print(f"ERROR: Error guardando en CSV: {e}")
 
 def should_accept_sample():
-    """Verifica si estamos en un minuto válido para tomar muestras (10, 20, 30, 40, 50, 00)"""
+    """Verifica si estamos en un minuto válido para tomar muestras (cada 5 minutos)"""
     now = datetime.now()
     minute = now.minute
-    return minute % 10 == 0
+    return minute % 5 == 0
 
 def main(db_handler=None):
     """Función principal - Lee datos cuando el Arduino los envía"""
@@ -71,7 +71,7 @@ def main(db_handler=None):
     try:
         ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
         print(f"Conectado a {SERIAL_PORT}")
-        print("Esperando minutos válidos (xx:00, xx:10, xx:20, xx:30, xx:40, xx:50)...")
+        print("Esperando minutos válidos (xx:00, xx:05, xx:10, ..., xx:55)...")
         
         while True:
             if ser.in_waiting > 0:
